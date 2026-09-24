@@ -1,0 +1,13 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Không bao giờ commit secret
+.env
+.env.*
+*.pem
+*.key
