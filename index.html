@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0B0E13">
 <meta name="description" content="QuetDoc QRcode — Quét mã QR/barcode bằng camera và ghi nhận dữ liệu, phân quyền quản trị / nhân viên.">
 <title>QuetDoc QRcode · Quét mã & ghi nhận dữ liệu</title>
-<link rel="stylesheet" href="assets/css/styles.css?v=6.1">
+<link rel="stylesheet" href="assets/css/styles.css?v=6.2">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" async></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" async></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" async></script>
@@ -222,10 +222,10 @@
   <!-- ============ QUẢN LÝ TÀI KHOẢN (ADMIN) ============ -->
   <section class="card pad hidden" id="adminPanel" style="margin-top:12px">
     <h2 class="sec-title">🛡 Quản lý tài khoản <span class="muted" style="font-weight:400">(chỉ quản trị viên)</span></h2>
-    <p class="sec-hint">Danh sách tài khoản (chỉ xem). Thêm / xóa / đặt lại mật khẩu: thực hiện trong <b>Supabase Dashboard → Authentication → Users</b>.</p>
-    <div style="overflow-x:auto;margin-top:12px">
+    <p class="sec-hint">Bấm vào ô <b>Tên nhân viên / Mã NV</b> để sửa. Nút <b>Đổi MK</b> đặt lại mật khẩu tài khoản đó. Thêm / xóa tài khoản: thực hiện trong <b>Supabase Dashboard → Authentication → Users</b> (rồi đăng nhập 1 lần để kích hoạt).</p>
+    <div class="tablewrap short" style="margin-top:12px">
       <table>
-        <thead><tr><th>Tên đăng nhập</th><th>Vai trò</th><th>Ngày tạo</th><th>Số bản ghi</th></tr></thead>
+        <thead><tr><th>Tên đăng nhập</th><th>Tên nhân viên / Mã NV</th><th>Vai trò</th><th>Ngày tạo</th><th>Số bản ghi</th><th></th></tr></thead>
         <tbody id="usersBody"></tbody>
       </table>
     </div>
@@ -293,7 +293,7 @@
   </section>
 
   <footer>
-    QuetDoc QRcode · <b>v6.1</b> · đồng bộ Supabase (đa thiết bị).<br>
+    QuetDoc QRcode · <b>v6.2</b> · đồng bộ Supabase (đa thiết bị).<br>
     💡 Mẹo: mở trang bằng <b>HTTPS</b> thì trình duyệt mới cho phép dùng camera.
   </footer>
 </div>

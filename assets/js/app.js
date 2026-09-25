@@ -1025,27 +1025,107 @@ function beginEditCell(recId, field, td) {
   inp.addEventListener("click", (e) => e.stopPropagation());
 }
 
-/* ---------------- danh sách tài khoản (admin xem) ----------------
- * Thêm/xóa/đặt lại mật khẩu thực hiện trong Supabase Dashboard → Authentication
- * để đảm bảo an toàn (cần service_role key, không thể làm từ frontend). */
+/* ---------------- danh sách tài khoản (admin quản lý) ----------------
+ * - Hiện toàn bộ user1..user5 (+admin): tài khoản chưa đăng nhập lần nào
+ *   hiện "chưa kích hoạt".
+ * - Admin bấm vào ô Tên nhân viên / Mã NV để sửa (display_name); tên đăng
+ *   nhập giữ nguyên để không gãy đăng nhập.
+ * - Admin đổi mật khẩu tài khoản khác qua RPC admin_set_password (cần chạy
+ *   migration-v6.2.sql). User thường chỉ đổi được MK của mình ở khung
+ *   "Tài khoản của tôi". */
+const EXPECTED_USERS = ["admin", "user1", "user2", "user3", "user4", "user5"];
+
+// Dựng danh sách hiển thị: hợp nhất tài khoản kỳ vọng + profiles thật.
+// Tách hàm thuần để test được (harness v6.2).
+function buildRoster(profiles) {
+  const byName = {};
+  (profiles || []).forEach((u) => { byName[String(u.username).toLowerCase()] = u; });
+  const names = [...new Set([...EXPECTED_USERS, ...Object.keys(byName)])];
+  const rank = (n) => n === "admin" ? -1 : (/^user(\d+)$/.exec(n) ? +RegExp.$1 : 99);
+  names.sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1));
+  return names.map((n) => ({ username: n, profile: byName[n] || null }));
+}
+
 async function loadAccounts() {
   if (!isAdmin() || !supa) return;
   const body = $("usersBody");
   try {
-    const { data, error } = await supa.from("profiles").select("id,username,role,created_at").order("username");
+    const { data, error } = await supa.from("profiles")
+      .select("id,username,role,display_name,created_at").order("username");
     if (error) throw error;
     const counts = {};
     state.records.forEach((r) => { if (r.userId) counts[r.userId] = (counts[r.userId] || 0) + 1; });
-    body.innerHTML = (data || []).map((u) =>
-      "<tr><td><b>" + esc(u.username) + "</b>" +
-        (state.me && u.id === state.me.id ? " <span class='badge new'>bạn</span>" : "") + "</td>" +
-      "<td>" + (u.role === "admin" ? "<span class='role admin'>Quản trị</span>" : "<span class='role user'>Nhân viên</span>") + "</td>" +
-      "<td class='muted'>" + fmtTime(u.created_at) + "</td>" +
-      "<td class='muted'>" + (counts[u.id] || 0) + "</td></tr>"
-    ).join("");
+    const meId = state.me && state.me.id;
+    body.innerHTML = buildRoster(data).map(({ username, profile: u }) => {
+      if (!u)
+        return "<tr><td><b>" + esc(username) + "</b> <span class='badge dup'>chưa kích hoạt</span></td>" +
+          "<td colspan='5' class='muted'>Chưa có tài khoản — tạo trong Supabase Dashboard → Authentication → Users, rồi đăng nhập 1 lần.</td></tr>";
+      const me = meId && u.id === meId;
+      return "<tr><td><b>" + esc(u.username) + "</b>" + (me ? " <span class='badge new'>bạn</span>" : "") + "</td>" +
+        "<td class='editable' data-dn-uid='" + u.id + "' title='Bấm để sửa tên nhân viên / mã NV'>" +
+          esc(u.display_name || "—") + "</td>" +
+        "<td>" + (u.role === "admin" ? "<span class='role admin'>Quản trị</span>" : "<span class='role user'>Nhân viên</span>") + "</td>" +
+        "<td class='muted'>" + fmtTime(u.created_at) + "</td>" +
+        "<td class='muted'>" + (counts[u.id] || 0) + "</td>" +
+        "<td><button class='small' data-pw-user='" + esc(u.username) + "'>Đổi MK</button></td></tr>";
+    }).join("");
+    body.querySelectorAll("[data-dn-uid]").forEach((td) =>
+      td.addEventListener("click", () => beginEditDisplayName(td.getAttribute("data-dn-uid"), td)));
+    body.querySelectorAll("[data-pw-user]").forEach((b) =>
+      b.addEventListener("click", () => adminResetPassword(b.getAttribute("data-pw-user"))));
   } catch (e) {
-    body.innerHTML = "<tr><td colspan='4' class='muted'>Không tải được danh sách tài khoản.</td></tr>";
+    body.innerHTML = "<tr><td colspan='6' class='muted'>Không tải được danh sách tài khoản.</td></tr>";
   }
+}
+
+/* Admin sửa tên nhân viên / mã NV (bấm vào ô). */
+function beginEditDisplayName(uid, td) {
+  if (!isAdmin()) return;
+  const cur = td.textContent.trim() === "—" ? "" : td.textContent.trim();
+  td.innerHTML = "";
+  const inp = document.createElement("input");
+  inp.value = cur; inp.placeholder = "Tên nhân viên / mã NV"; inp.setAttribute("aria-label", "Tên nhân viên / mã NV");
+  inp.style.width = "100%"; inp.style.minHeight = "36px";
+  td.appendChild(inp); inp.focus(); inp.select();
+  let done = false;
+  const commit = async (save) => {
+    if (done) return; done = true;
+    const v = inp.value.trim();
+    if (save && v !== cur) {
+      const { error } = await supa.from("profiles").update({ display_name: v || null }).eq("id", uid);
+      if (error) toast("Lỗi lưu: " + error.message, "err");
+      else toast("Đã cập nhật tên hiển thị.", "ok");
+    }
+    loadAccounts();
+  };
+  inp.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") commit(true);
+    if (e.key === "Escape") commit(false);
+    e.stopPropagation();
+  });
+  inp.addEventListener("blur", () => commit(true));
+  inp.addEventListener("click", (e) => e.stopPropagation());
+}
+
+/* Admin đặt lại mật khẩu tài khoản khác (cần migration-v6.2.sql). */
+function adminResetPassword(username) {
+  if (!isAdmin()) return;
+  openModal("Đổi mật khẩu — " + username,
+    '<div class="field"><label for="mNewPass">Mật khẩu mới (từ 6 ký tự)</label>' +
+    '<input type="password" id="mNewPass" autocomplete="new-password"></div>' +
+    '<p class="sec-hint" style="margin:8px 0 0">Tài khoản <b>' + esc(username) + '</b> sẽ dùng mật khẩu mới từ lần đăng nhập sau.</p>',
+    "Đổi mật khẩu", async () => {
+      const p = $("mNewPass").value;
+      if (!p || p.length < 6) { toast("Mật khẩu mới phải từ 6 ký tự trở lên.", "warn"); return; }
+      const { error } = await supa.rpc("admin_set_password", { p_username: username, p_new_password: p });
+      if (error) {
+        const hint = /function/i.test(error.message) ? " (chưa chạy migration-v6.2.sql?)" : "";
+        toast("Lỗi đổi mật khẩu: " + error.message + hint, "err");
+        return;
+      }
+      closeModal();
+      toast("Đã đổi mật khẩu cho " + username + ".", "ok");
+    });
 }
 
 /* ---------------- master data đơn hàng (file ĐƠN ĐẶT HÀNG TVS chuẩn) ----------------
