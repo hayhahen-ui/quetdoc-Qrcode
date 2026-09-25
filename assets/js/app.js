@@ -556,9 +556,13 @@ async function startScan() {
   $("reader").innerHTML = "";
   html5Qr = new Html5Qrcode("reader");
   setCamStatus("⏳ Đang mở camera…", "");
-  // Chưa chọn tay -> ép dùng camera sau (trình duyệt tự chọn), tránh nhầm camera trước
-  // khi tên camera chưa đọc được (chưa cấp quyền).
-  const camConstraint = (state.camManual && camId) ? camId : { facingMode: "environment" };
+  // Chưa chọn tay -> ưu tiên camera sau XÁC ĐỊNH RÕ theo tên (deviceId exact).
+  // Lý do: facingMode:"environment" trên một số máy Android vẫn mở nhầm camera trước.
+  // Sau khi đã cấp quyền, tên camera đọc được đầy đủ ("camera 0, facing back") nên cách này chính xác nhất.
+  const backCam = state.cameras.find((c) => /(facing back|\bback\b|\brear\b|environment)/i.test(c.label || ""));
+  const camConstraint = (state.camManual && camId) ? camId
+    : backCam ? { deviceId: { exact: backCam.id } }
+    : { facingMode: "environment" };
   try {
     await html5Qr.start(
       camConstraint,
@@ -592,6 +596,10 @@ async function startScan() {
       if (st.deviceId) state.cameraId = st.deviceId;
       state.realFacing = st.facingMode || "";
     } catch (e) {}
+    // Kiểm chứng sau khi mở: nếu vẫn mở nhầm camera trước thì báo để user chọn tay
+    if (!state.camManual && state.realFacing === "user") {
+      toast("Máy đã mở nhầm camera trước. Hãy mở danh sách camera, chọn camera sau (facing back) rồi bấm quét lại.", "warn");
+    }
     listCameras();
   } catch (e) {
     setCamStatus("🔴 Không mở được camera", "warn");
@@ -612,6 +620,7 @@ async function stopScan() {
   const rd = $("reader");
   if (rd) rd.innerHTML = '<div class="reader-idle">📷<br>Nhấn <b>Bắt đầu quét</b> để mở camera</div>';
   setCamStatus("⚪ Camera đang tắt", "");
+  listCameras(); // tải lại nhãn thường (xóa chữ "— đang dùng" còn kẹt lại)
 }
 function updateTorchBtn() {
   const btn = $("btnTorch");
