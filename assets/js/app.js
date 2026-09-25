@@ -593,6 +593,27 @@ function dirDelete(chiThi) {
     });
 }
 
+/* Xóa TOÀN BỘ bản ghi quét của mọi tài khoản (chỉ admin).
+ * Yêu cầu gõ đúng cụm xác nhận để tránh bấm nhầm. */
+function adminWipeAll() {
+  if (!isAdmin()) { toast("Chỉ quản trị viên được xóa toàn bộ dữ liệu.", "err"); return; }
+  openModal("⚠️ Xóa TOÀN BỘ dữ liệu quét",
+    "<p>Hành động này sẽ xóa <b>vĩnh viễn</b> toàn bộ bản ghi quét của <b>mọi tài khoản</b>. Không thể hoàn tác.</p>" +
+    "<div class='field'><label>Gõ <b>XÓA HẾT</b> để xác nhận</label>" +
+    "<input id='mWipeConfirm' placeholder='XÓA HẾT' autocomplete='off'></div>",
+    "Xóa toàn bộ", async () => {
+      const v = ($("mWipeConfirm").value || "").trim();
+      if (v !== "XÓA HẾT") { toast("Bạn chưa gõ đúng cụm xác nhận.", "warn"); return; }
+      const { error } = await supa.from("records")
+        .delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      closeModal();
+      if (error) { toast("Lỗi xóa: " + error.message, "err"); return; }
+      state.page = 0;
+      try { await loadRecords(); } catch (e) {}
+      toast("Đã xóa toàn bộ dữ liệu quét.", "ok");
+    });
+}
+
 /* ---------------- tài khoản của tôi ---------------- */
 async function changeMyPassword() {
   const p1 = $("newPass").value, p2 = $("newPass2").value;
@@ -910,6 +931,8 @@ function bindEvents() {
   $("btnClear").addEventListener("click", clearAll);
 
   $("btnDirAdd").addEventListener("click", () => dirForm(""));
+
+  $("btnWipeAll").addEventListener("click", adminWipeAll);
 
   $("btnChgPass").addEventListener("click", changeMyPassword);
 
