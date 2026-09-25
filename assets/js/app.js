@@ -1572,7 +1572,7 @@ function openReportModal() {
 async function fetchDayRecords(day) {
   const t0 = new Date(day + "T00:00:00+07:00");
   const t1 = new Date(t0); t1.setDate(t1.getDate() + 1);
-  const cols = schemaV4 ? "content,chi_thi,session,scanned_at" : "content,session,scanned_at";
+  const cols = schemaV4 ? "content,chi_thi,session,scanned_at,username" : "content,session,scanned_at,username";
   let all = [], from = 0;
   for (;;) {
     let q = supa.from("records").select(cols)
@@ -1605,14 +1605,20 @@ function computeReport(dayRows) {
     ranges.forEach((rg) => {
       let p = 0;
       const boxSet = new Set(); // lưu SỐ IN TRÊN TEM (0-index) để hiển thị cột M
+      const userSet = new Set(); // v5.6: người quét của khoảng này
       for (const r of list) {
         const t = boxTail(r.content, ct);
         if (t == null) continue;
         const n = t + 1; // số packing (1-index) để tra khoảng
-        if (rg.thung_tu <= n && n <= rg.thung_den) { p++; boxSet.add(t); }
+        if (rg.thung_tu <= n && n <= rg.thung_den) {
+          p++; boxSet.add(t);
+          const u = (r.username || "").trim();
+          if (u) userSet.add(u);
+        }
       }
       const boxes = [...boxSet].sort((a, b) => a - b);
-      rows.push({ rg: rg, p: p, q: p * (rg.doi_thung || 0), left: (rg.so_thung || 0) - p, boxes: boxes });
+      rows.push({ rg: rg, p: p, q: p * (rg.doi_thung || 0), left: (rg.so_thung || 0) - p,
+        boxes: boxes, users: [...userSet].sort().join(", ") });
     });
   });
   return { rows: rows, noPack: noPack, totalScans: seen.size };
@@ -1645,14 +1651,14 @@ async function exportReport(day, palletQ, typeQ) {
   const YELLOW = "FFFFFF00", GREEN = "FFC6EFCE";
   const headers = ["STT", "Mã chỉ thị", "Po#", "Art#", "SIZE", "Tổng số đôi",
     "Số đôi/thùng", "Số thùng", "Số thùng từ", "Số thùng đến",
-    "đếm số thùng", "số lượng", "số thứ tự thùng"];
+    "đếm số thùng", "số lượng", "số thứ tự thùng", "Người quét"];
   const NC = headers.length;
   const wb = new ExcelJS.Workbook();
   wb.creator = "QuetDoc QRcode";
   const ws = wb.addWorksheet("Báo cáo nhập kho");
   ws.columns = [{ width: 6 }, { width: 16 }, { width: 18 }, { width: 12 }, { width: 10 },
                 { width: 14 }, { width: 14 }, { width: 12 }, { width: 14 }, { width: 14 },
-                { width: 14 }, { width: 12 }, { width: 18 }];
+                { width: 14 }, { width: 12 }, { width: 18 }, { width: 16 }];
   // Tiêu đề + tổng ở góc phải (đúng mẫu): tổng luôn nằm dưới 2 cột đếm (K, L)
   const dstr = day.split("-").reverse().join("/");
   ws.mergeCells(1, 1, 1, 10);
@@ -1695,9 +1701,9 @@ async function exportReport(day, palletQ, typeQ) {
       : "";
     const row = ws.addRow([i + 1, g.chi_thi, g.po || "", g.art || "",
       +g.size || g.size, g.tong_doi || 0, g.doi_thung || 0, g.so_thung || 0,
-      g.thung_tu, g.thung_den, it.p, it.q, boxStr]);
+      g.thung_tu, g.thung_den, it.p, it.q, boxStr, it.users || ""]);
     row.eachCell((cell, cn) => {
-      xlBodyCell(cell, cn !== 3 && cn !== 4);
+      xlBodyCell(cell, cn !== 3 && cn !== 4 && cn !== 14); // v5.6: cột N tên người quét căn trái
       if (cn === NC - 2 || cn === NC - 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: GREEN } };
       if (cn === NC) { cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true }; row.height = Math.max(18, Math.ceil(boxStr.length / 28) * 15); }
     });
