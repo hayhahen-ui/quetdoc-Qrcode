@@ -350,7 +350,8 @@ async function loadRecords() {
  * của tem để tự điền size. Chỉ điền khi size còn trống (không ghi đè pad
  * do người dùng chọn). Chạy nền, không chặn lần quét tiếp theo. */
 let ocrWorkerP = null;
-const ocrPending = {}; // content -> "5.0-6" (kết quả OCR đang chờ vá vào bản ghi)
+const pendingSizes = {}; // content -> { size: "5.0-6", auto: true/false } (size đang chờ vá vào bản ghi)
+let ocrSeq = 0; // tăng mỗi lần quét -> job OCR của mã cũ tự hủy
 
 function loadTessScript() {
   return new Promise((res, rej) => {
@@ -409,41 +410,47 @@ function setOcrStatus(msg) {
 }
 
 async function ocrFillSize(content) {
+  const mySeq = ++ocrSeq;
   const rec0 = state.records.find((r) => r.content === content);
   if (!rec0 || rec0.size) return; // pad đã có size -> không tốn OCR
   const crop = captureSizeCrop(); // chụp NGAY khung hình lúc vừa quét
   if (!crop) { setOcrStatus("🤖 không chụp được khung hình camera."); return; }
-  setOcrStatus("🤖 đang đọc size từ tem…");
-  if (Object.keys(ocrPending).length > 300) { for (const k in ocrPending) delete ocrPending[k]; }
+  setOcrStatus("🤖 đang tải thư viện OCR…");
+  if (Object.keys(pendingSizes).length > 300) { for (const k in pendingSizes) delete pendingSizes[k]; }
   const worker = await ensureOCR();
-  if (!worker) { setOcrStatus("🤖 không tải được thư viện OCR — dùng pad chọn tay."); return; }
+  if (mySeq !== ocrSeq) return; // đã quét mã mới hơn -> bỏ job cũ
+  if (!worker) { setOcrStatus("🤖 không tải được thư viện OCR — chạm chọn size bên dưới."); return; }
+  setOcrStatus("🤖 đang đọc size từ tem…");
   let sizeStr = null;
   try {
     const { data } = await worker.recognize(crop);
+    if (mySeq !== ocrSeq) return;
     if ((data.confidence || 0) >= 45) sizeStr = parseSizeText(data.text);
   } catch (e) { setOcrStatus("🤖 lỗi khi đọc size."); return; }
-  if (!sizeStr) { setOcrStatus("🤖 không đọc được size — chọn pad hoặc bấm ô Size để sửa."); return; }
-  ocrPending[content] = sizeStr;
-  applyOcrSize(content);
+  if (!sizeStr) { setOcrStatus("🤖 không đọc được size — chạm chọn size bên dưới."); return; }
+  pendingSizes[content] = { size: sizeStr, auto: true };
+  applyPendingSize(content);
 }
 
-// Vá size OCR vào bản ghi: chỉ khi size còn trống. Được gọi sau khi OCR xong
-// và sau khi insert nền hoàn tất (đề phòng OCR xong trước khi server trả về).
-function applyOcrSize(content) {
-  const sizeStr = ocrPending[content];
-  if (!sizeStr) return;
+// Vá size đang chờ vào bản ghi (từ OCR hoặc từ dải chọn size trong banner).
+// Được gọi sau khi OCR/chọn xong và sau khi insert nền hoàn tất (đề phòng
+// xong trước khi server trả về). OCR (auto) không ghi đè size đã có;
+// chọn tay luôn ghi đè (dùng để sửa).
+function applyPendingSize(content) {
+  const p = pendingSizes[content];
+  if (!p) return;
   const rec = state.records.find((r) => r.content === content);
   if (!rec) return;
-  if (rec.size) { delete ocrPending[content]; return; } // người dùng đã chọn pad/sửa tay -> bỏ OCR
-  rec.size = sizeStr;
-  rec.ocrSize = true;
-  setOcrStatus("🤖 đã đọc size: " + sizeStr + " ✓");
+  if (p.auto && rec.size) { delete pendingSizes[content]; return; }
+  rec.size = p.size;
+  rec.ocrSize = !!p.auto;
+  setOcrStatus(p.auto ? "🤖 đã đọc size: " + p.size + " ✓" : "");
   renderAll();
   if (!rec.pending && !String(rec.id).startsWith("tmp_") && supa && schemaV4) {
-    supa.from("records").update({ size: sizeStr }).eq("id", rec.id).then(() => {}).catch(() => {});
-    delete ocrPending[content];
+    supa.from("records").update({ size: p.size }).eq("id", rec.id).then(() => {}).catch(() => {});
+    delete pendingSizes[content];
   }
-  // nếu vẫn pending: addRecord sẽ gọi applyOcrSize lại sau khi insert xong
+  // nếu vẫn pending: addRecord sẽ gọi applyPendingSize lại sau khi insert xong
 }
 
 // Ghi 1 bản ghi, tự hạ cấp khi server chưa có cột v4.0 (chưa chạy migration)
@@ -524,10 +531,10 @@ async function addRecord(content, format) {
     const i = state.records.findIndex((r) => r.id === tempId);
     const fresh = rowToRec(data);
     if (i >= 0) state.records[i] = fresh; else state.records.unshift(fresh);
-    applyOcrSize(content); // v4.6: vá size OCR nếu đã đọc xong trong lúc insert bay
+    applyPendingSize(content); // v4.6+: vá size đang chờ nếu đã xong trong lúc insert bay
     renderAll();
   } catch (e) {
-    delete ocrPending[content];
+    delete pendingSizes[content];
     state.records = state.records.filter((r) => r.id !== tempId);
     const msg = (e && e.message) || "không rõ";
     if (e && (e.code === "23505" || e.status === 409)) {
@@ -542,16 +549,47 @@ async function addRecord(content, format) {
 }
 
 // Banner "đã ghi nhận" — gọi ngay khi quét được, không chờ mạng
-function showOkBox(rec) {
+function showOkBox(rec, silent) {
   const box = $("lastscan");
   box.classList.remove("show"); void box.offsetWidth;
   box.classList.remove("dup");
   box.innerHTML = "✅ <b>Đã ghi nhận:</b><br>" +
     "<code>" + esc(rec.content) + "</code><br><span class='muted'>" + esc(rec.format) + " · " + fmtTime(rec.scannedAt) + "</span>" +
     (rec.chiThi ? "<br><span class='muted'>Chỉ thị <b>" + esc(rec.chiThi) + "</b>" +
-      (rec.po ? " · PO " + esc(rec.po) : "") + (rec.size ? " · Size " + esc(rec.size) : "") + "</span>" : "");
+      (rec.po ? " · PO " + esc(rec.po) : "") + (rec.size ? " · Size " + esc(rec.size) : "") + "</span> " : "") +
+    stripHTML(rec);
   box.classList.add("show");
-  toast("Đã ghi nhận mã mới.", "ok");
+  bindStrip(box);
+  if (!silent) toast("Đã ghi nhận mã mới.", "ok");
+}
+
+// v4.8: dải chọn size 1 chạm ngay trong banner quét — không cần cuộn xuống pad.
+// Chạm là gán size cho đúng thùng vừa quét (không đụng sticky pad).
+function stripHTML(rec) {
+  const cur = (rec.size || "").split("-")[0];
+  let btns = "";
+  for (let s = 3; s <= 9.01; s += 0.5) {
+    const v = s.toFixed(1);
+    btns += "<button class='szbtn" + (cur === v ? " active" : "") + "' data-strip-size='" + v + "'>" + v + "</button>";
+  }
+  return "<div class='szstrip'><span class='seclabel'>Size thùng vừa quét — chạm 1 lần:</span>" +
+    "<div class='sizepad' data-strip='" + esc(rec.content) + "'>" + btns + "</div></div>";
+}
+
+function bindStrip(box) {
+  const pad = box.querySelector("[data-strip]");
+  if (!pad) return;
+  const content = pad.getAttribute("data-strip");
+  pad.querySelectorAll("[data-strip-size]").forEach((b) =>
+    b.addEventListener("click", () => setStripSize(content, b.getAttribute("data-strip-size"))));
+}
+
+function setStripSize(content, sizeUK) {
+  const sizeStr = sizeUK + "-" + (state.settings.pairs ?? 6);
+  pendingSizes[content] = { size: sizeStr, auto: false };
+  applyPendingSize(content);
+  const rec = state.records.find((r) => r.content === content);
+  if (rec) showOkBox(rec, true); // vẽ lại banner: hiện size + nút active, không toast lại
 }
 
 function showDupBox(dup, content) {
@@ -1177,6 +1215,7 @@ async function startScan() {
       () => {}
     );
     state.scanning = true;
+    ensureOCR().catch(() => {}); // v4.8: tải trước thư viện OCR khi mở camera để quét đầu không phải chờ
     $("btnStart").disabled = true; $("btnStop").disabled = false;
     $("cameraSelect").disabled = true;
     setCamStatus("🟢 <b>Đang quét</b> — hướng camera vào mã", "ok");
