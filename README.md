@@ -31,14 +31,19 @@ Quét mã **QR / barcode** bằng camera và **ghi nhận dữ liệu** (nội d
 - 🛡 Mỗi mã chỉ ghi nhận **1 lần duy nhất trên toàn hệ thống** — quét trùng thì bỏ qua, chỉ cảnh báo "Đã được quét"
 - ☁️ Đồng bộ trực tiếp đa thiết bị (Supabase + realtime)
 - 🔍 Tìm kiếm, lọc theo ngày, phân trang
-- ⬇ Xuất **CSV** (mở ngon bằng Excel, có dấu tiếng Việt) và **JSON**
+- 🏷 **Chế độ tem thùng giày (v4.0)**: tự tách **Chỉ thị** từ số thùng (9 ký tự đầu, VD `AE260821060012` → `AE2608210`),
+  tự tra **PO / Size mặc định** từ **Danh mục Chỉ thị** (admin quản lý), bấm vào ô PO/Size để sửa từng thùng
+- ⬇ Xuất **Excel (.xlsx)** đúng mẫu: 1 sheet/ngày, cột `STT | Chỉ thị | PO | Size/số đôi | Số thùng | Số pallet | Giờ quét | Người quét`,
+  header vàng, tên file `Ket_Qua_Quet_Ma_YYYYMMDD_HHMMSS.xlsx`; vẫn có **CSV** và **JSON**
 - 📊 Thống kê: tổng lượt quét / hôm nay / mã duy nhất / lượt bỏ qua trùng
 
 ## Cấu hình Supabase (làm 1 lần)
 
 1. Tạo project miễn phí tại [supabase.com](https://supabase.com).
-2. **SQL Editor** → New query → chạy SQL tạo bảng `profiles`, `records`, unique index
-   chống trùng, realtime và các RLS policy (xem `docs/supabase-setup.sql`).
+2. **SQL Editor** → New query → chạy **toàn bộ** `docs/supabase-setup.sql`
+   (tạo bảng `profiles`, `records`, `directives`, unique index chống trùng, realtime và các RLS policy).
+   > Đã chạy SQL bản cũ? Chạy lại toàn bộ file vẫn an toàn (mọi lệnh đều `IF NOT EXISTS`);
+   > đoạn **v4.0** ở cuối file sẽ thêm cột `chi_thi/po/size`, bảng `directives` và seed 4 chỉ thị mẫu.
 3. **Authentication** → **Users** → Add user (bật **Auto Confirm user**):
    `admin@quetdoc.local` / `admin123`, `user1@quetdoc.local` / `123456` … `user5@quetdoc.local` / `123456`.
    (Supabase yêu cầu mật khẩu tối thiểu 6 ký tự.)

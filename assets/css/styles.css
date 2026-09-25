@@ -130,3 +130,7 @@ footer a{color:#7dd3fc}
 .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
 .noscript-warn{max-width:560px;margin:18px auto;padding:14px 16px;border:1px solid #f59e0b;
   background:#2a1f0d;color:#fcd34d;border-radius:12px;font-size:14px;line-height:1.5}
+
+/* v4.0: ô PO/Size sửa trực tiếp trên bảng */
+td.editable{cursor:pointer}
+td.editable:hover{background:rgba(245,158,11,.14)}

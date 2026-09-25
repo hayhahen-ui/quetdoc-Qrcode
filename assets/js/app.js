@@ -52,6 +52,7 @@ const state = {
   page: 0,
   filterText: "",
   filterDate: "",
+  directives: {},       // danh mục Chỉ thị: { "AE2608210": {po, size} }
 };
 
 let html5Qr = null;
@@ -75,6 +76,15 @@ function fmtTime(iso) {
 }
 function todayStr() {
   return new Date().toLocaleDateString("en-CA", { timeZone: TZ }); // YYYY-MM-DD
+}
+function fmtTimeOnly(iso) {
+  try { return new Date(iso).toLocaleTimeString("vi-VN", { timeZone: TZ, hour12: false }); }
+  catch (e) { return ""; }
+}
+/* Tem thùng giày: số thùng VD "AE260821060012" -> chỉ thị = 9 ký tự đầu (2 chữ + 7 số) */
+function parseChiThi(content) {
+  const m = String(content || "").trim().match(/^([A-Za-z]{2}\d{7})/);
+  return m ? m[1].toUpperCase() : "";
 }
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
@@ -178,6 +188,7 @@ function doLogout() {
   } catch (e) {}
   state.me = null;
   state.records = [];
+  state.directives = {};
   $("viewApp").classList.add("hidden");
   $("viewLogin").classList.remove("hidden");
   $("loginUser").value = "";
@@ -193,14 +204,16 @@ async function enterApp() {
   rc.className = "role " + state.me.role;
   const admin = isAdmin();
   $("adminPanel").classList.toggle("hidden", !admin);
+  $("dirPanel").classList.toggle("hidden", !admin);
   $("btnClear").innerHTML = admin ? "🗑 Xóa tất cả" : "🗑 Xóa bản ghi của tôi";
   $("dataHint").textContent = admin
-    ? "Bạn đang xem toàn bộ bản ghi của mọi tài khoản — đồng bộ trực tiếp, không cần tải lại trang."
-    : "Bạn chỉ xem được các mã do chính mình quét. Dữ liệu đồng bộ lên máy chủ chung.";
+    ? "Bạn đang xem toàn bộ bản ghi của mọi tài khoản — đồng bộ trực tiếp. Bấm vào ô PO / Size để sửa."
+    : "Bạn chỉ xem được các mã do chính mình quét. Bấm vào ô PO / Size để sửa.";
   state.page = 0;
   renderHead();
   try {
     await loadRecords();
+    await loadDirectives();
     if (admin) await loadAccounts();
   } catch (e) {
     toast("Không tải được dữ liệu: " + (e.message || e), "err");
@@ -239,12 +252,13 @@ const rowToRec = (r) => ({
   id: r.id, content: r.content, format: r.format || "QR",
   scannedAt: r.scanned_at, session: r.session || "", note: r.note || "",
   userId: r.user_id, username: r.username || "",
+  chiThi: r.chi_thi || "", po: r.po || "", size: r.size || "",
 });
 
 async function loadRecords() {
   if (!supa || !state.me) return;
   const { data, error } = await supa.from("records")
-    .select("id,content,format,session,note,user_id,username,scanned_at")
+    .select("id,content,format,session,note,user_id,username,scanned_at,chi_thi,po,size")
     .order("scanned_at", { ascending: false })
     .limit(500);
   if (error) throw error;
@@ -286,6 +300,10 @@ async function addRecord(content, format) {
   box.innerHTML = "⏳ <b>Đang ghi nhận…</b><br><code>" + esc(content) + "</code>";
   box.classList.add("show");
 
+  // Tem thùng giày: tự tách chỉ thị từ số thùng, tra PO/Size mặc định từ danh mục
+  const chiThi = parseChiThi(content);
+  const dir = chiThi ? state.directives[chiThi] : null;
+
   const { data, error } = await supa.from("records").insert({
     content,
     format: format || "QR",
@@ -293,7 +311,10 @@ async function addRecord(content, format) {
     note: state.settings.note.trim(),
     user_id: state.me.id,
     username: state.me.username,
-  }).select("id,content,format,session,note,user_id,username,scanned_at").single();
+    chi_thi: chiThi,
+    po: dir ? dir.po : "",
+    size: dir ? dir.size : "",
+  }).select("id,content,format,session,note,user_id,username,scanned_at,chi_thi,po,size").single();
 
   if (error) {
     // 23505 = unique index records_content_uniq: máy khác đã quét mã này trước
@@ -312,7 +333,9 @@ async function addRecord(content, format) {
   renderAll();
   box.classList.remove("dup");
   box.innerHTML = "✅ <b>Đã ghi nhận:</b><br>" +
-    "<code>" + esc(content) + "</code><br><span class='muted'>" + esc(rec.format) + " · " + fmtTime(rec.scannedAt) + "</span>";
+    "<code>" + esc(content) + "</code><br><span class='muted'>" + esc(rec.format) + " · " + fmtTime(rec.scannedAt) + "</span>" +
+    (rec.chiThi ? "<br><span class='muted'>Chỉ thị <b>" + esc(rec.chiThi) + "</b>" +
+      (rec.po ? " · PO " + esc(rec.po) : "") + (rec.size ? " · Size " + esc(rec.size) : "") + "</span>" : "");
   box.classList.add("show");
   beep(true);
   toast("Đã ghi nhận mã mới (đồng bộ).", "ok");
@@ -365,6 +388,9 @@ function filteredRecords() {
   const q = state.filterText.trim().toLowerCase();
   return visibleRecords().filter((r) => {
     if (q && !(r.content.toLowerCase().includes(q) ||
+               (r.chiThi || "").toLowerCase().includes(q) ||
+               (r.po || "").toLowerCase().includes(q) ||
+               (r.size || "").toLowerCase().includes(q) ||
                (r.note || "").toLowerCase().includes(q) ||
                (r.session || "").toLowerCase().includes(q) ||
                (r.username || "").toLowerCase().includes(q))) return false;
@@ -389,7 +415,7 @@ function renderAll() {
   if (!state.me) { doLogout(); return; }
   renderStats(); renderTable();
   const n = visibleRecords().length;
-  $("btnExportCsv").disabled = $("btnExportJson").disabled = $("btnClear").disabled = !n;
+  $("btnExportXlsx").disabled = $("btnExportCsv").disabled = $("btnExportJson").disabled = $("btnClear").disabled = !n;
 }
 
 function renderStats() {
@@ -402,8 +428,8 @@ function renderStats() {
 
 function renderHead() {
   const admin = isAdmin();
-  $("theadRow").innerHTML = "<tr><th>#</th><th>Nội dung mã</th><th>Định dạng</th><th>Thời gian quét</th>" +
-    "<th>Phiên / Ghi chú</th>" + (admin ? "<th>Người quét</th>" : "") + "<th></th></tr>";
+  $("theadRow").innerHTML = "<tr><th>#</th><th>Chỉ thị</th><th>PO</th><th>Size</th><th>Số thùng</th>" +
+    "<th>Giờ quét</th><th>Số pallet</th>" + (admin ? "<th>Người quét</th>" : "") + "<th></th></tr>";
 }
 
 function renderTable() {
@@ -412,7 +438,7 @@ function renderTable() {
   const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
   state.page = Math.min(state.page, pages - 1);
   const slice = list.slice(state.page * PAGE_SIZE, state.page * PAGE_SIZE + PAGE_SIZE);
-  const cols = admin ? 7 : 6;
+  const cols = admin ? 9 : 8;
 
   const body = $("tbody");
   if (!slice.length) {
@@ -424,10 +450,13 @@ function renderTable() {
       const n = state.page * PAGE_SIZE + i + 1;
       return "<tr>" +
         "<td class='muted'>" + n + "</td>" +
-        "<td class='content'><code style='font-size:12px'>" + esc(r.content) + "</code></td>" +
-        "<td class='muted'>" + esc(r.format || "") + "</td>" +
+        "<td><b>" + esc(r.chiThi || "—") + "</b></td>" +
+        "<td class='editable' data-edit='po' data-id='" + r.id + "' title='Bấm để sửa PO'>" + esc(r.po || "—") + "</td>" +
+        "<td class='editable' data-edit='size' data-id='" + r.id + "' title='Bấm để sửa Size'>" + esc(r.size || "—") + "</td>" +
+        "<td class='content'><code style='font-size:12px'>" + esc(r.content) + "</code>" +
+          (r.note ? "<br><span class='muted'>" + esc(r.note) + "</span>" : "") + "</td>" +
         "<td class='muted' style='white-space:nowrap'>" + fmtTime(r.scannedAt) + "</td>" +
-        "<td>" + esc(r.session || "") + (r.note ? "<br><span class='muted'>" + esc(r.note) + "</span>" : "") + "</td>" +
+        "<td>" + esc(r.session || "") + "</td>" +
         (admin ? "<td><b>" + esc(r.username || "—") + "</b></td>" : "") +
         "<td><button class='small danger' data-del='" + r.id + "'>Xóa</button></td>" +
         "</tr>";
@@ -435,11 +464,46 @@ function renderTable() {
   }
   body.querySelectorAll("[data-del]").forEach((b) =>
     b.addEventListener("click", () => deleteRecord(b.getAttribute("data-del"))));
+  body.querySelectorAll("[data-edit]").forEach((td) =>
+    td.addEventListener("click", () => beginEditCell(td.getAttribute("data-id"), td.getAttribute("data-edit"), td)));
 
   $("recCount").textContent = list.length;
   $("pageInfo").textContent = "Trang " + (state.page + 1) + "/" + pages + " · " + list.length + " bản ghi";
   $("btnPrev").disabled = state.page <= 0;
   $("btnNext").disabled = state.page >= pages - 1;
+}
+
+/* Sửa PO/Size ngay trên bảng (bấm vào ô). Chủ bản ghi hoặc admin mới được sửa. */
+function beginEditCell(recId, field, td) {
+  const rec = state.records.find((r) => r.id === recId);
+  if (!rec) return;
+  if (!isAdmin() && rec.userId !== state.me.id) { toast("Bạn chỉ được sửa bản ghi của mình.", "err"); return; }
+  const label = field === "po" ? "PO" : "Size";
+  const cur = rec[field] || "";
+  td.innerHTML = "";
+  const inp = document.createElement("input");
+  inp.value = cur; inp.placeholder = label; inp.setAttribute("aria-label", label);
+  inp.style.width = "110px";
+  td.appendChild(inp); inp.focus(); inp.select();
+  let done = false;
+  const commit = async (save) => {
+    if (done) return; done = true;
+    const v = inp.value.trim();
+    if (save && v !== cur) {
+      const patch = {}; patch[field] = v;
+      const { error } = await supa.from("records").update(patch).eq("id", recId);
+      if (error) { toast("Lỗi lưu: " + error.message, "err"); }
+      else { rec[field] = v; toast("Đã cập nhật " + label + ".", "ok"); }
+    }
+    renderTable();
+  };
+  inp.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") commit(true);
+    if (e.key === "Escape") commit(false);
+    e.stopPropagation();
+  });
+  inp.addEventListener("blur", () => commit(true));
+  inp.addEventListener("click", (e) => e.stopPropagation());
 }
 
 /* ---------------- danh sách tài khoản (admin xem) ----------------
@@ -465,6 +529,70 @@ async function loadAccounts() {
   }
 }
 
+/* ---------------- danh mục chỉ thị (tem thùng giày, admin quản lý) ---------------- */
+async function loadDirectives() {
+  state.directives = {};
+  if (!supa) return;
+  try {
+    const { data, error } = await supa.from("directives").select("chi_thi,po,size").order("chi_thi");
+    if (error) throw error;
+    (data || []).forEach((d) => { state.directives[d.chi_thi] = { po: d.po || "", size: d.size || "" }; });
+  } catch (e) { console.warn("Không tải được danh mục chỉ thị:", e.message); }
+  if (isAdmin()) renderDirectives();
+}
+function renderDirectives() {
+  const body = $("dirBody");
+  if (!body) return;
+  const keys = Object.keys(state.directives).sort();
+  if (!keys.length) {
+    body.innerHTML = "<tr><td colspan='4' class='muted'>Chưa có chỉ thị nào. Bấm “＋ Thêm chỉ thị”.</td></tr>";
+    return;
+  }
+  body.innerHTML = keys.map((k) => {
+    const d = state.directives[k];
+    return "<tr><td><b>" + esc(k) + "</b></td><td>" + esc(d.po || "—") + "</td><td>" + esc(d.size || "—") + "</td>" +
+      "<td style='white-space:nowrap'><button class='small' data-diredit='" + esc(k) + "'>Sửa</button> " +
+      "<button class='small danger' data-dirdel='" + esc(k) + "'>Xóa</button></td></tr>";
+  }).join("");
+  body.querySelectorAll("[data-diredit]").forEach((b) =>
+    b.addEventListener("click", () => dirForm(b.getAttribute("data-diredit"))));
+  body.querySelectorAll("[data-dirdel]").forEach((b) =>
+    b.addEventListener("click", () => dirDelete(b.getAttribute("data-dirdel"))));
+}
+function dirForm(chiThi) {
+  const d = (chiThi && state.directives[chiThi]) || { po: "", size: "" };
+  openModal(chiThi ? "Sửa chỉ thị " + chiThi : "Thêm chỉ thị",
+    "<div class='field'><label>Chỉ thị (2 chữ + 7 số)</label>" +
+    "<input id='mChiThi' value='" + esc(chiThi || "") + "'" + (chiThi ? " disabled" : "") +
+    " placeholder='VD: AE2608210' style='text-transform:uppercase'></div>" +
+    "<div class='field'><label>PO</label><input id='mPo' value='" + esc(d.po) + "' placeholder='VD: 0903174893-1'></div>" +
+    "<div class='field'><label>Size mặc định (tự điền khi quét, sửa được từng thùng)</label>" +
+    "<input id='mSize' value='" + esc(d.size) + "' placeholder='VD: 5.0-6'></div>",
+    "Lưu", async () => {
+      const k = (chiThi || $("mChiThi").value).trim().toUpperCase();
+      const po = $("mPo").value.trim(), size = $("mSize").value.trim();
+      if (!/^[A-Z]{2}\d{7}$/.test(k)) { toast("Chỉ thị phải đúng dạng 2 chữ + 7 số (VD: AE2608210).", "warn"); return; }
+      const { error } = await supa.from("directives").upsert(
+        { chi_thi: k, po, size, updated_at: new Date().toISOString(), updated_by: state.me.username },
+        { onConflict: "chi_thi" });
+      closeModal();
+      if (error) { toast("Lỗi lưu danh mục: " + error.message, "err"); return; }
+      await loadDirectives();
+      toast("Đã lưu chỉ thị " + k + ".", "ok");
+    });
+}
+function dirDelete(chiThi) {
+  openModal("Xóa chỉ thị",
+    "<p>Xóa <b>" + esc(chiThi) + "</b> khỏi danh mục? Các bản ghi đã quét giữ nguyên.</p>",
+    "Xóa", async () => {
+      const { error } = await supa.from("directives").delete().eq("chi_thi", chiThi);
+      closeModal();
+      if (error) { toast("Lỗi xóa: " + error.message, "err"); return; }
+      await loadDirectives();
+      toast("Đã xóa chỉ thị " + chiThi + ".", "ok");
+    });
+}
+
 /* ---------------- tài khoản của tôi ---------------- */
 async function changeMyPassword() {
   const p1 = $("newPass").value, p2 = $("newPass2").value;
@@ -484,14 +612,71 @@ function download(name, content, type) {
   document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
 }
+/* Xuất Excel .xlsx đúng mẫu tem thùng: 1 sheet/ngày, header vàng, cột
+ * STT | Chỉ thị | PO | Size/số đôi | Số thùng | Số pallet | Giờ quét | Người quét */
+async function exportExcel() {
+  const list = filteredRecords();
+  if (!list.length) { toast("Không có bản ghi nào để xuất.", "warn"); return; }
+  if (typeof XLSX === "undefined") {
+    toast("Chưa tải được thư viện Excel. Kiểm tra mạng rồi thử lại (hoặc dùng Xuất CSV).", "err");
+    return;
+  }
+  const groups = {};
+  list.forEach((r) => {
+    const d = new Date(r.scannedAt).toLocaleDateString("en-CA", { timeZone: TZ });
+    (groups[d] = groups[d] || []).push(r);
+  });
+  const wb = XLSX.utils.book_new();
+  const headers = ["STT", "Chỉ thị", "PO", "Size/số đôi", "Số thùng", "Số pallet", "Giờ quét", "Người quét"];
+  const thinB = { style: "thin", color: { rgb: "FF94A3B8" } };
+  const borderAll = { left: thinB, right: thinB, top: thinB, bottom: thinB };
+  const hdrStyle = {
+    font: { name: "Arial", sz: 11, bold: true, color: { rgb: "FF0F172A" } },
+    fill: { patternType: "solid", fgColor: { rgb: "FFF59E0B" } },
+    alignment: { horizontal: "center", vertical: "center" },
+    border: borderAll,
+  };
+  const cellStyle = (center) => ({
+    font: { name: "Arial", sz: 11 },
+    alignment: { horizontal: center ? "center" : "left", vertical: "center" },
+    border: borderAll,
+  });
+  Object.keys(groups).sort().forEach((day) => {
+    const rows = groups[day].slice().sort((a, b) => new Date(a.scannedAt) - new Date(b.scannedAt));
+    const ws = XLSX.utils.aoa_to_sheet([headers].concat(rows.map((r, i) => [
+      i + 1, r.chiThi || "", r.po || "", r.size || "", r.content || "",
+      r.session || "", fmtTimeOnly(r.scannedAt), r.username || "",
+    ])));
+    const range = XLSX.utils.decode_range(ws["!ref"]);
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const addr = XLSX.utils.encode_cell({ r: 0, c });
+      if (ws[addr]) ws[addr].s = hdrStyle;
+    }
+    for (let rr = 1; rr <= range.e.r; rr++) {
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const addr = XLSX.utils.encode_cell({ r: rr, c });
+        if (ws[addr]) {
+          ws[addr].s = cellStyle(c === 0 || c === 6);
+          ws[addr].t = c === 0 ? "n" : "s"; // STT là số; còn lại ép text (giữ số 0 đầu PO)
+        }
+      }
+    }
+    ws["!cols"] = [{ wch: 8 }, { wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 22 }, { wch: 14 }, { wch: 12 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, ws, day);
+  });
+  const stamp = todayStr().replace(/-/g, "") + "_" +
+    new Date().toLocaleTimeString("vi-VN", { timeZone: TZ, hour12: false }).replace(/:/g, "");
+  XLSX.writeFile(wb, "Ket_Qua_Quet_Ma_" + stamp + ".xlsx");
+  toast("Đã xuất file Excel (" + list.length + " bản ghi, " + Object.keys(groups).length + " sheet).", "ok");
+}
 function exportCSV() {
   const list = filteredRecords();
-  const head = ["STT", "Noi dung ma", "Dinh dang", "Thoi gian quet (GMT+7)", "Phien", "Ghi chu", "Nguoi quet"];
+  const head = ["STT", "Chi thi", "PO", "Size", "So thung", "So pallet", "Gio quet (GMT+7)", "Nguoi quet"];
   const q = (v) => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
   const lines = [head.map(q).join(",")];
   list.forEach((r, i) => lines.push(
-    [i + 1, r.content, r.format, fmtTime(r.scannedAt), r.session, r.note, r.username].map(q).join(",")));
-  download("quetdoc_qrcode_" + todayStr() + ".csv", "﻿" + lines.join("\r\n"), "text/csv;charset=utf-8");
+    [i + 1, r.chiThi, r.po, r.size, r.content, r.session, fmtTime(r.scannedAt), r.username].map(q).join(",")));
+  download("Ket_Qua_Quet_Ma_" + todayStr().replace(/-/g, "") + ".csv", "﻿" + lines.join("\r\n"), "text/csv;charset=utf-8");
   toast("Đã xuất file CSV (" + list.length + " bản ghi).", "ok");
 }
 function exportJSON() {
@@ -719,9 +904,12 @@ function bindEvents() {
   $("btnPrev").addEventListener("click", () => { if (state.page > 0) { state.page--; renderTable(); } });
   $("btnNext").addEventListener("click", () => { state.page++; renderTable(); });
 
+  $("btnExportXlsx").addEventListener("click", exportExcel);
   $("btnExportCsv").addEventListener("click", exportCSV);
   $("btnExportJson").addEventListener("click", exportJSON);
   $("btnClear").addEventListener("click", clearAll);
+
+  $("btnDirAdd").addEventListener("click", () => dirForm(""));
 
   $("btnChgPass").addEventListener("click", changeMyPassword);
 

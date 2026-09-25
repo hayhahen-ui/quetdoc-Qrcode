@@ -51,3 +51,47 @@ create policy "records_insert" on public.records
 drop policy if exists "records_delete" on public.records;
 create policy "records_delete" on public.records
   for delete using (user_id = auth.uid() or public.is_admin());
+
+/* ================= v4.0: TEM THÙNG GIÀY (25/09/2026) =================
+ * Chạy đoạn này trong Supabase Dashboard -> SQL Editor (toàn bộ file cũng chạy được,
+ * các lệnh cũ đều có IF NOT EXISTS / DROP IF EXISTS nên an toàn khi chạy lại).
+ *
+ * - records thêm 3 cột: chi_thi (9 ký tự đầu của số thùng, VD AE2608210),
+ *   po (VD 0903174893-1), size (VD 5.0-6).
+ * - Bảng directives: danh mục Chỉ thị -> PO + Size mặc định (admin quản lý).
+ *   Khi quét, app tự tách chỉ thị từ số thùng và tra PO/Size từ danh mục này. */
+
+alter table public.records
+  add column if not exists chi_thi text,
+  add column if not exists po text,
+  add column if not exists size text;
+
+-- Cho phép chủ bản ghi (hoặc admin) SỬA po/size sau khi quét (sửa inline trên bảng)
+drop policy if exists "records_update" on public.records;
+create policy "records_update" on public.records
+  for update using (user_id = auth.uid() or public.is_admin())
+  with check (user_id = auth.uid() or public.is_admin());
+
+create table if not exists public.directives (
+  chi_thi text primary key,
+  po text not null default '',
+  size text not null default '',
+  updated_at timestamptz not null default now(),
+  updated_by text not null default ''
+);
+alter table public.directives enable row level security;
+
+drop policy if exists "directives_read" on public.directives;
+create policy "directives_read" on public.directives
+  for select to authenticated using (true);
+drop policy if exists "directives_admin_write" on public.directives;
+create policy "directives_admin_write" on public.directives
+  for all to authenticated
+  using (public.is_admin()) with check (public.is_admin());
+
+-- Seed 4 chỉ thị từ tem mẫu (25/09/2026)
+insert into public.directives (chi_thi, po, size, updated_by) values
+  ('AE2608210', '0903174893-1', '5.0-6', 'seed'),
+  ('AE2608443', '0903172240-1', '6.0-6', 'seed'),
+  ('AE2607353', '0903082783-1', '8.0-3', 'seed')
+on conflict (chi_thi) do nothing;

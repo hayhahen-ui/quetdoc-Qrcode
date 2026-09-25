@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="assets/css/styles.css?v=3.1">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" async></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" async></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" async></script>
 </head>
 <body>
 <noscript><div class="noscript-warn">⚠️ Trình duyệt của bạn đang <b>tắt JavaScript</b> nên app không chạy được. Hãy bật JavaScript cho trang này (hoặc dùng trình duyệt khác/điện thoại).</div></noscript>
@@ -47,7 +48,7 @@
       <div class="logo">📷</div>
       <div>
         <h1>QuetDoc QRcode</h1>
-        <p class="sub">Quét mã QR / barcode bằng camera · ghi nhận dữ liệu · xuất Excel/CSV</p>
+        <p class="sub">Quét mã thùng giày · tự tách Chỉ thị · xuất Excel theo mẫu</p>
       </div>
     </div>
     <div class="chips">
@@ -104,8 +105,8 @@
 
       <div class="rowflex" style="margin-top:12px">
         <div class="field inline">
-          <label for="sessionInput">Phiên / ca / kho</label>
-          <input type="text" id="sessionInput" placeholder="VD: Ca sáng 24/09, Kho A…">
+          <label for="sessionInput">Số pallet</label>
+          <input type="text" id="sessionInput" placeholder="VD: 449, NK 4573…">
         </div>
         <div class="field inline">
           <label for="noteInput">Ghi chú mặc định</label>
@@ -125,11 +126,12 @@
       <p class="sec-hint" id="dataHint">Dữ liệu lưu trong trình duyệt của bạn, tắt trang vẫn còn. Xuất CSV để mở bằng Excel.</p>
 
       <div class="toolbar">
-        <input type="text" id="searchInput" placeholder="🔍 Tìm nội dung, ghi chú, phiên…" style="flex:2;min-width:160px">
+        <input type="text" id="searchInput" placeholder="🔍 Tìm chỉ thị, PO, số thùng…" style="flex:2;min-width:160px">
         <input type="date" id="dateInput" style="flex:1;min-width:140px">
         <button class="small" id="btnClearFilter">Xóa lọc</button>
       </div>
       <div class="toolbar">
+        <button class="small" id="btnExportXlsx">⬇ Xuất Excel</button>
         <button class="small" id="btnExportCsv">⬇ Xuất CSV</button>
         <button class="small" id="btnExportJson">⬇ Xuất JSON</button>
         <span class="spacer"></span>
@@ -161,6 +163,19 @@
       </table>
     </div>
     <p class="sec-hint" style="margin-top:10px">🔄 Dữ liệu đồng bộ trực tiếp: bản ghi mới từ các máy sẽ tự hiện mà không cần tải lại trang.</p>
+  </section>
+
+  <!-- ============ DANH MỤC CHỈ THỊ (ADMIN) ============ -->
+  <section class="card pad hidden" id="dirPanel" style="margin-top:12px">
+    <h2 class="sec-title">🏷 Danh mục Chỉ thị <span class="muted" style="font-weight:400">(chỉ quản trị viên)</span></h2>
+    <p class="sec-hint">Khi quét tem thùng, app tự tách <b>Chỉ thị</b> từ số thùng (9 ký tự đầu) và tra <b>PO / Size mặc định</b> từ danh mục này. Size từng thùng có thể bấm sửa trực tiếp trên bảng dữ liệu.</p>
+    <div class="toolbar"><button class="small" id="btnDirAdd">＋ Thêm chỉ thị</button></div>
+    <div style="overflow-x:auto;margin-top:8px">
+      <table>
+        <thead><tr><th>Chỉ thị</th><th>PO</th><th>Size mặc định</th><th></th></tr></thead>
+        <tbody id="dirBody"></tbody>
+      </table>
+    </div>
   </section>
 
   <!-- ============ TÀI KHOẢN CỦA TÔI ============ -->
@@ -200,6 +215,6 @@
 </div>
 
 <div id="toasts"></div>
-<script src="assets/js/app.js?v=3.1.4" defer></script>
+<script src="assets/js/app.js?v=4.0" defer></script>
 </body>
 </html>
