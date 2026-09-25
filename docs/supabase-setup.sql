@@ -89,7 +89,7 @@ create policy "directives_admin_write" on public.directives
   for all to authenticated
   using (public.is_admin()) with check (public.is_admin());
 
--- Seed 4 chỉ thị từ tem mẫu (25/09/2026)
+-- Seed 3 chỉ thị từ tem mẫu (25/09/2026)
 insert into public.directives (chi_thi, po, size, updated_by) values
   ('AE2608210', '0903174893-1', '5.0-6', 'seed'),
   ('AE2608443', '0903172240-1', '6.0-6', 'seed'),
