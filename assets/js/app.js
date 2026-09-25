@@ -248,12 +248,18 @@ function openModal(title, bodyHTML, okLabel, onOk) {
 function closeModal() { $("modal").classList.add("hidden"); modalOkFn = null; }
 
 /* ---------------- records (Supabase - dữ liệu chung đa thiết bị) ---------------- */
-const rowToRec = (r) => ({
-  id: r.id, content: r.content, format: r.format || "QR",
-  scannedAt: r.scanned_at, session: r.session || "", note: r.note || "",
-  userId: r.user_id, username: r.username || "",
-  chiThi: r.chi_thi || "", po: r.po || "", size: r.size || "",
-});
+const rowToRec = (r) => {
+  const content = r.content || "";
+  return {
+    id: r.id, content, format: r.format || "QR",
+    scannedAt: r.scanned_at, session: r.session || "", note: r.note || "",
+    userId: r.user_id, username: r.username || "",
+    // Chỉ thị là DẪN XUẤT của số thùng -> tự suy ra khi cột DB trống
+    // (bản ghi cũ, hoặc ghi lúc server chưa chạy migration v4.0).
+    // Nhờ vậy bảng, tìm kiếm và xuất Excel/CSV luôn có Chỉ thị.
+    chiThi: r.chi_thi || parseChiThi(content), po: r.po || "", size: r.size || "",
+  };
+};
 
 // Cột đọc/ghi bản ghi. Server chưa chạy migration v4.0 -> tự hạ về bản cũ,
 // app vẫn quét/ghi bình thường (thiếu Chỉ thị/PO/Size cho tới khi chạy migration).
@@ -281,6 +287,21 @@ async function loadRecords() {
   state.records.sort((a, b) => new Date(b.scannedAt) - new Date(a.scannedAt));
   state.page = 0;
   renderAll();
+  // Tự vá chi_thi còn trống trong DB (bản ghi cũ / ghi lúc chưa migration):
+  // chạy nền, không chặn UI; dừng ngay khi gặp lỗi (VD hết quyền).
+  if (schemaV4 && q.data) {
+    const missing = q.data
+      .filter((d) => !d.chi_thi && parseChiThi(d.content || "") && (isAdmin() || d.user_id === state.me.id))
+      .slice(0, 200);
+    if (missing.length) {
+      (async () => {
+        for (const d of missing) {
+          const { error } = await supa.from("records").update({ chi_thi: parseChiThi(d.content) }).eq("id", d.id);
+          if (error) break;
+        }
+      })();
+    }
+  }
 }
 
 // Ghi 1 bản ghi, tự hạ cấp khi server chưa có cột v4.0 (chưa chạy migration)
@@ -652,6 +673,18 @@ function dirForm(chiThi) {
       closeModal();
       if (error) { toast("Lỗi lưu danh mục: " + error.message, "err"); return; }
       await loadDirectives();
+      // Kaizen: tự điền PO/Size cho các bản ghi cũ cùng chỉ thị mà đang trống,
+      // để bảng và file xuất không còn ô "—" sau khi admin bổ sung danh mục.
+      if (schemaV4 && (po || size)) {
+        try {
+          const fill = {};
+          if (po) fill.po = po;
+          if (size) fill.size = size;
+          await supa.from("records").update(fill).eq("chi_thi", k).eq("po", "");
+          await supa.from("records").update(fill).eq("chi_thi", k).is("po", null);
+          await loadRecords();
+        } catch (e) { /* thiếu quyền/cột -> bỏ qua, không chặn */ }
+      }
       toast("Đã lưu chỉ thị " + k + ".", "ok");
     });
 }
