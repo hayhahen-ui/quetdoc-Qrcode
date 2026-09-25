@@ -1069,6 +1069,7 @@ async function loadPacking() {
   }
   if (isAdmin()) renderPacking();
   refreshReportBtn(); // v5.1.1: bật nút báo cáo ngay khi packing tải xong
+  backfillPackingSizes(); // v5.2.2: vá size/PO cho bản ghi quét lúc chưa có packing
 }
 function setPacking(rows) {
   state.packing = rows;
@@ -1116,6 +1117,29 @@ function isPackSize(rec) {
   if (!rec || !rec.size) return false;
   const p = packingLookup(rec.chiThi, rec.content);
   return !!p && packSizeStr(p) === rec.size;
+}
+/* v5.2.2: tự vá size/PO cho bản ghi cũ còn trống từ packing list
+ * (quét lúc packing chưa nạp / trước khi có mapping chuẩn).
+ * Chỉ điền khi đang trống — không ghi đè size tay/OCR/PO đã có. */
+async function backfillPackingSizes() {
+  if (!supa || !state.me || !state.packingReady || !state.packing.length) return;
+  let filled = 0;
+  for (const rec of state.records) {
+    if (rec.pending || String(rec.id).startsWith("tmp_")) continue;
+    if (rec.size && rec.po) continue;
+    const p = packingLookup(rec.chiThi, rec.content);
+    if (!p) continue;
+    const upd = {};
+    if (!rec.size) { rec.size = packSizeStr(p); upd.size = rec.size; }
+    if (!rec.po && p.po) { rec.po = p.po; upd.po = rec.po; }
+    if (!Object.keys(upd).length) continue;
+    filled++;
+    supa.from("records").update(upd).eq("id", rec.id).then(() => {}).catch(() => {});
+  }
+  if (filled) {
+    renderAll();
+    toast("Đã tự điền size/PO từ packing list cho " + filled + " bản ghi cũ 📦", "ok");
+  }
 }
 
 /* ---- admin: quản lý packing list ---- */
