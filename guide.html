@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>📖 Hướng dẫn sử dụng — QuetDoc QRcode</title>
+<style>
+:root{
+  --bg:#0b1220; --card:#111a2e; --elev:#162032; --border:#223148;
+  --text:#e6edf7; --muted:#8ea0b8;
+  --emerald:#34d399; --blue:#38bdf8; --amber:#f59e0b; --violet:#a78bfa; --pink:#f472b6; --red:#f87171;
+  --r:14px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding-bottom:64px}
+.ghead{position:sticky;top:0;z-index:10;background:rgba(11,18,32,.94);backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--border);padding:12px 18px;display:flex;gap:14px;align-items:center}
+.back{display:inline-flex;align-items:center;gap:6px;background:var(--elev);border:1px solid var(--border);
+  color:var(--text);text-decoration:none;border-radius:10px;padding:9px 14px;font-weight:650;white-space:nowrap}
+.back:hover{background:#1f2a3d}
+.ghead h1{margin:0;font-size:19px}
+.ghead p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.wrap{max-width:1180px;margin:0 auto;padding:18px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:18px 20px;margin:16px 0}
+.card h2{margin:0 0 10px;font-size:18px;display:flex;align-items:center;gap:8px}
+ol.steps{margin:8px 0;padding-left:22px}
+ol.steps li{margin:7px 0}
+.tip{background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.35);border-radius:10px;padding:9px 12px;margin:10px 0;font-size:14px}
+.warn{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.4);border-radius:10px;padding:9px 12px;margin:10px 0;font-size:14px}
+.adminline{background:rgba(248,113,113,.07);border:1px solid rgba(248,113,113,.4);border-radius:10px;padding:9px 12px;margin:10px 0;font-size:14px}
+code{background:#0a0f1c;border:1px solid var(--border);border-radius:6px;padding:1px 7px;font-size:13px;color:#7dd3fc}
+/* 5 bước */
+.steps5{list-style:none;display:flex;gap:0;margin:6px 0;padding:0;flex-wrap:wrap}
+.steps5 li{flex:1 1 150px;background:var(--elev);border:1px solid var(--border);border-radius:12px;
+  padding:12px;text-align:center;position:relative;margin:4px}
+.steps5 li:not(:last-child)::after{content:"→";position:absolute;right:-16px;top:38%;color:var(--emerald);font-weight:800;z-index:1}
+.steps5 b{display:inline-flex;width:30px;height:30px;border-radius:50%;background:var(--emerald);color:#03150f;
+  align-items:center;justify-content:center;margin-bottom:6px;font-size:15px}
+.steps5 span{display:block;font-weight:650}
+.steps5 small{color:var(--muted)}
+/* mindmap */
+.mapwrap{overflow-x:auto}
+svg.mindmap{min-width:900px;width:100%;height:auto;display:block}
+.branch{cursor:pointer}
+.branch:hover .bnode{filter:brightness(1.25)}
+.bnode{fill:#141d2e;stroke-width:2.5}
+.bleaft{fill-opacity:.09;stroke-width:1.2}
+.btxt{fill:#e6edf7;font-size:15px;font-weight:700}
+.ltxt{fill:#cbd5e1;font-size:13px}
+.ctxt{fill:#ecfdf5;font-size:16px;font-weight:800}
+.conn{fill:none;stroke-width:2.5;opacity:.75}
+.spine{stroke-width:1.6;opacity:.5}
+/* legend */
+.legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.chip{display:inline-flex;align-items:center;gap:7px;background:var(--elev);border:1px solid var(--border);
+  border-radius:999px;padding:6px 13px;font-size:13.5px}
+.dot{width:12px;height:12px;border-radius:50%;flex:none}
+.key{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;color:var(--muted);font-size:13.5px}
+/* section accent */
+#sec-login{border-left:4px solid var(--blue)} #sec-login h2{color:var(--blue)}
+#sec-session{border-left:4px solid var(--amber)} #sec-session h2{color:var(--amber)}
+#sec-scan{border-left:4px solid var(--emerald)} #sec-scan h2{color:var(--emerald)}
+#sec-size{border-left:4px solid var(--violet)} #sec-size h2{color:var(--violet)}
+#sec-data{border-left:4px solid var(--pink)} #sec-data h2{color:var(--pink)}
+#sec-admin{border-left:4px solid var(--red)} #sec-admin h2{color:var(--red)}
+footer{text-align:center;color:var(--muted);font-size:13px;margin-top:26px}
+</style>
+</head>
+<body>
+<header class="ghead">
+  <a class="back" href="./">← Quay lại app</a>
+  <div>
+    <h1>📖 Hướng dẫn sử dụng QuetDoc QRcode</h1>
+    <p>Sơ đồ tư duy + từng bước chi tiết — cho người quét và quản trị viên · <i>Quét là ghi.</i></p>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section class="card">
+  <h2>⚡ Quy trình chuẩn — 5 bước mỗi ca</h2>
+  <ol class="steps5">
+    <li><b>1</b><span>Đăng nhập</span><small>user được cấp</small></li>
+    <li><b>2</b><span>Điền phiên quét</span><small>Kiểm/Nhập/Xuất · pallet · chỉ thị · PO</small></li>
+    <li><b>3</b><span>Quét mã</span><small>camera / ảnh / nhập tay</small></li>
+    <li><b>4</b><span>Chạm size</span><small>ngay trong banner "Đã ghi nhận"</small></li>
+    <li><b>5</b><span>Xuất báo cáo</span><small>Excel đúng mẫu xưởng</small></li>
+  </ol>
+</section>
+
+<section class="card">
+  <h2>🗺 Sơ đồ tư duy — bấm vào từng nhánh để xem chi tiết</h2>
+  <div class="mapwrap">
+  <svg class="mindmap" viewBox="0 0 1240 800" role="img" aria-label="Sơ đồ tư duy QuetDoc QRcode">
+    <!-- connectors -->
+    <path class="conn" stroke="#f87171" d="M555 400 C 470 400, 415 88, 330 88"/>
+    <path class="conn" stroke="#f472b6" d="M555 400 C 470 400, 415 328, 330 328"/>
+    <path class="conn" stroke="#a78bfa" d="M555 400 C 470 400, 415 568, 330 568"/>
+    <path class="conn" stroke="#38bdf8" d="M685 400 C 770 400, 825 88, 910 88"/>
+    <path class="conn" stroke="#f59e0b" d="M685 400 C 770 400, 825 328, 910 328"/>
+    <path class="conn" stroke="#34d399" d="M685 400 C 770 400, 825 568, 910 568"/>
+    <!-- center -->
+    <rect x="555" y="360" width="130" height="80" rx="20" fill="#064e3b" stroke="#34d399" stroke-width="2.5"/>
+    <text x="620" y="393" text-anchor="middle" class="ctxt">QuetDoc</text>
+    <text x="620" y="416" text-anchor="middle" class="ctxt" font-size="13" font-weight="600">Quét là ghi.</text>
+
+    <!-- LEFT A: admin -->
+    <g class="branch" data-target="sec-admin">
+      <line class="spine" stroke="#f87171" x1="225" y1="116" x2="225" y2="255"/>
+      <rect class="bnode" x="120" y="60" width="210" height="56" rx="14" stroke="#f87171"/>
+      <text x="225" y="94" text-anchor="middle" class="btxt">🛡 Quản trị · admin</text>
+      <rect class="bleaft" x="120" y="132" width="210" height="30" rx="9" fill="#f87171" stroke="#f87171"/>
+      <text x="225" y="152" text-anchor="middle" class="ltxt">Tài khoản &amp; tên NV</text>
+      <rect class="bleaft" x="120" y="168" width="210" height="30" rx="9" fill="#f87171" stroke="#f87171"/>
+      <text x="225" y="188" text-anchor="middle" class="ltxt">Packing list</text>
+      <rect class="bleaft" x="120" y="204" width="210" height="30" rx="9" fill="#f87171" stroke="#f87171"/>
+      <text x="225" y="224" text-anchor="middle" class="ltxt">Master đơn hàng</text>
+      <rect class="bleaft" x="120" y="240" width="210" height="30" rx="9" fill="#f87171" stroke="#f87171"/>
+      <text x="225" y="260" text-anchor="middle" class="ltxt">Dashboard · Xóa dữ liệu</text>
+    </g>
+    <!-- LEFT B: dữ liệu -->
+    <g class="branch" data-target="sec-data">
+      <line class="spine" stroke="#f472b6" x1="225" y1="356" x2="225" y2="495"/>
+      <rect class="bnode" x="120" y="300" width="210" height="56" rx="14" stroke="#f472b6"/>
+      <text x="225" y="334" text-anchor="middle" class="btxt">🗂 Dữ liệu &amp; Báo cáo</text>
+      <rect class="bleaft" x="120" y="372" width="210" height="30" rx="9" fill="#f472b6" stroke="#f472b6"/>
+      <text x="225" y="392" text-anchor="middle" class="ltxt">Tìm · sửa PO / Size</text>
+      <rect class="bleaft" x="120" y="408" width="210" height="30" rx="9" fill="#f472b6" stroke="#f472b6"/>
+      <text x="225" y="428" text-anchor="middle" class="ltxt">Xuất Excel / CSV / JSON</text>
+      <rect class="bleaft" x="120" y="444" width="210" height="30" rx="9" fill="#f472b6" stroke="#f472b6"/>
+      <text x="225" y="464" text-anchor="middle" class="ltxt">Báo cáo theo mẫu xưởng</text>
+      <rect class="bleaft" x="120" y="480" width="210" height="30" rx="9" fill="#f472b6" stroke="#f472b6"/>
+      <text x="225" y="500" text-anchor="middle" class="ltxt">Tổng hợp theo nhân viên</text>
+    </g>
+    <!-- LEFT C: size -->
+    <g class="branch" data-target="sec-size">
+      <line class="spine" stroke="#a78bfa" x1="225" y1="596" x2="225" y2="699"/>
+      <rect class="bnode" x="120" y="540" width="210" height="56" rx="14" stroke="#a78bfa"/>
+      <text x="225" y="574" text-anchor="middle" class="btxt">📏 Size thùng</text>
+      <rect class="bleaft" x="120" y="612" width="210" height="30" rx="9" fill="#a78bfa" stroke="#a78bfa"/>
+      <text x="225" y="632" text-anchor="middle" class="ltxt">Dải nút trong banner</text>
+      <rect class="bleaft" x="120" y="648" width="210" height="30" rx="9" fill="#a78bfa" stroke="#a78bfa"/>
+      <text x="225" y="668" text-anchor="middle" class="ltxt">Chạm 1 lần = gán size</text>
+      <rect class="bleaft" x="120" y="684" width="210" height="30" rx="9" fill="#a78bfa" stroke="#a78bfa"/>
+      <text x="225" y="704" text-anchor="middle" class="ltxt">Số đôi − / +</text>
+    </g>
+    <!-- RIGHT D: đăng nhập -->
+    <g class="branch" data-target="sec-login">
+      <line class="spine" stroke="#38bdf8" x1="1015" y1="116" x2="1015" y2="219"/>
+      <rect class="bnode" x="910" y="60" width="210" height="56" rx="14" stroke="#38bdf8"/>
+      <text x="1015" y="94" text-anchor="middle" class="btxt">🔐 Đăng nhập</text>
+      <rect class="bleaft" x="910" y="132" width="210" height="30" rx="9" fill="#38bdf8" stroke="#38bdf8"/>
+      <text x="1015" y="152" text-anchor="middle" class="ltxt">user1–user5 · admin</text>
+      <rect class="bleaft" x="910" y="168" width="210" height="30" rx="9" fill="#38bdf8" stroke="#38bdf8"/>
+      <text x="1015" y="188" text-anchor="middle" class="ltxt">Đổi mật khẩu</text>
+      <rect class="bleaft" x="910" y="204" width="210" height="30" rx="9" fill="#38bdf8" stroke="#38bdf8"/>
+      <text x="1015" y="224" text-anchor="middle" class="ltxt">Quên MK → nhờ admin</text>
+    </g>
+    <!-- RIGHT E: phiên quét -->
+    <g class="branch" data-target="sec-session">
+      <line class="spine" stroke="#f59e0b" x1="1015" y1="356" x2="1015" y2="495"/>
+      <rect class="bnode" x="910" y="300" width="210" height="56" rx="14" stroke="#f59e0b"/>
+      <text x="1015" y="334" text-anchor="middle" class="btxt">🎯 Phiên quét</text>
+      <rect class="bleaft" x="910" y="372" width="210" height="30" rx="9" fill="#f59e0b" stroke="#f59e0b"/>
+      <text x="1015" y="392" text-anchor="middle" class="ltxt">Kiểm / Nhập / Xuất</text>
+      <rect class="bleaft" x="910" y="408" width="210" height="30" rx="9" fill="#f59e0b" stroke="#f59e0b"/>
+      <text x="1015" y="428" text-anchor="middle" class="ltxt">Số pallet</text>
+      <rect class="bleaft" x="910" y="444" width="210" height="30" rx="9" fill="#f59e0b" stroke="#f59e0b"/>
+      <text x="1015" y="464" text-anchor="middle" class="ltxt">4 số cuối chỉ thị + PO</text>
+      <rect class="bleaft" x="910" y="480" width="210" height="30" rx="9" fill="#f59e0b" stroke="#f59e0b"/>
+      <text x="1015" y="500" text-anchor="middle" class="ltxt">Phiên được nhớ</text>
+    </g>
+    <!-- RIGHT F: quét mã -->
+    <g class="branch" data-target="sec-scan">
+      <line class="spine" stroke="#34d399" x1="1015" y1="596" x2="1015" y2="735"/>
+      <rect class="bnode" x="910" y="540" width="210" height="56" rx="14" stroke="#34d399"/>
+      <text x="1015" y="574" text-anchor="middle" class="btxt">📷 Quét mã</text>
+      <rect class="bleaft" x="910" y="612" width="210" height="30" rx="9" fill="#34d399" stroke="#34d399"/>
+      <text x="1015" y="632" text-anchor="middle" class="ltxt">Camera · Ảnh · Nhập tay</text>
+      <rect class="bleaft" x="910" y="648" width="210" height="30" rx="9" fill="#34d399" stroke="#34d399"/>
+      <text x="1015" y="668" text-anchor="middle" class="ltxt">🤖 OCR đọc size trên tem</text>
+      <rect class="bleaft" x="910" y="684" width="210" height="30" rx="9" fill="#34d399" stroke="#34d399"/>
+      <text x="1015" y="704" text-anchor="middle" class="ltxt">Bíp + banner = đã ghi</text>
+      <rect class="bleaft" x="910" y="720" width="210" height="30" rx="9" fill="#34d399" stroke="#34d399"/>
+      <text x="1015" y="740" text-anchor="middle" class="ltxt">Trùng mã → cảnh báo</text>
+    </g>
+  </svg>
+  </div>
+  <div class="legend">
+    <span class="chip"><span class="dot" style="background:#38bdf8"></span>Đăng nhập</span>
+    <span class="chip"><span class="dot" style="background:#f59e0b"></span>Phiên quét</span>
+    <span class="chip"><span class="dot" style="background:#34d399"></span>Quét mã</span>
+    <span class="chip"><span class="dot" style="background:#a78bfa"></span>Size thùng</span>
+    <span class="chip"><span class="dot" style="background:#f472b6"></span>Dữ liệu &amp; Báo cáo</span>
+    <span class="chip"><span class="dot" style="background:#f87171"></span>Quản trị (admin)</span>
+  </div>
+  <div class="key">
+    <span>💡 Mẹo dùng nhanh</span><span>⚠️ Lưu ý quan trọng</span><span>🛡 Chỉ admin thấy / làm được</span>
+    <span>👆 Bấm vào nhánh trên sơ đồ để nhảy tới phần chi tiết</span>
+  </div>
+</section>
+
+<section class="card" id="sec-login">
+  <h2>🔐 Đăng nhập</h2>
+  <ol class="steps">
+    <li>Mở app → nhập <b>Tên đăng nhập</b> (VD: <code>user1</code>) và <b>Mật khẩu</b> → bấm <b>Đăng nhập</b>.</li>
+    <li>Tài khoản do admin cấp: <code>admin</code>, <code>user1</code> … <code>user5</code>. Tên đăng nhập không đổi được.</li>
+    <li><b>Đổi mật khẩu của mình:</b> kéo xuống cuối trang → mục <b>"Tài khoản của tôi"</b> → nhập mật khẩu mới 2 lần → Lưu (tối thiểu 6 ký tự).</li>
+    <li><b>Quên mật khẩu</b> → nhờ admin đặt lại trong mục <b>Quản lý tài khoản</b>.</li>
+  </ol>
+  <div class="tip">💡 Đăng nhập 1 lần, app tự nhớ phiên — lần sau mở là vào thẳng màn hình quét.</div>
+</section>
+
+<section class="card" id="sec-session">
+  <h2>🎯 Phiên quét <small style="color:var(--muted);font-weight:400">(bắt buộc trước khi quét)</small></h2>
+  <ol class="steps">
+    <li>Điền đủ <b>4 ô</b> trong khung 🎯: <b>Loại pallet</b> (Kiểm / Nhập / Xuất), <b>Số pallet</b> (1, 2, 3…), <b>4 số cuối Chỉ thị</b> (VD: <code>8209</code>), <b>4 số cuối PO</b> (VD: <code>4964</code>).</li>
+    <li>App tự đối chiếu với packing/master: <b>khớp đúng 1</b> → hiện đủ <code>AE2608209 · PO 0903174964-1</code>; <b>trùng nhiều</b> → chọn tay trong danh sách; <b>không khớp</b> → bị chặn, kiểm tra lại số đã nhập.</li>
+    <li>Chưa điền đủ → 3 nút quét (camera / ảnh / nhập tay) mờ đi + gợi ý còn thiếu gì.</li>
+    <li>Mỗi mã quét được gắn phiên, VD: <b>"Kiểm 1"</b> — dùng để lọc báo cáo và đếm pallet.</li>
+  </ol>
+  <div class="warn">⚠️ Quét lệch chỉ thị/PO so với phiên → app cảnh báo to nhưng <b>vẫn ghi nhận</b>. Đang quét mà xóa trống ô phiên → camera tự dừng.</div>
+  <div class="tip">💡 Phiên được <b>tự nhớ</b> — tắt app mở lại vẫn còn, không cần nhập lại mỗi ca.</div>
+</section>
+
+<section class="card" id="sec-scan">
+  <h2>📷 Quét mã</h2>
+  <ol class="steps">
+    <li>Chọn 1 trong 3 cách: <b>Bắt đầu quét</b> (camera) · <b>Quét ảnh</b> (chụp tem có sẵn) · <b>Nhập tay</b> (gõ số thùng).</li>
+    <li>Đưa tem vào khung ngắm → nghe <b>tiếng bíp</b> + banner xanh <b>"Đã ghi nhận"</b> = đã lưu (ghi ngay, đồng bộ nền — không cần chờ).</li>
+    <li>Mỗi lần quét app tự làm: tách <b>Chỉ thị</b> (9 ký tự đầu) → tra <b>Packing list</b> lấy PO + Size/số đôi (hiện badge 📦) → thiếu packing thì <b>🤖 OCR</b> đọc dòng <code>UK 5.0-6</code> in trên tem.</li>
+    <li><b>Mã trùng</b> (đã quét rồi) → cảnh báo vàng, không đếm 2 lần.</li>
+  </ol>
+  <div class="warn">⚠️ iPhone: mở bằng <b>Safari</b> (không dùng webview Zalo/Facebook), cho phép truy cập camera. Nếu khung đen → bấm <b>Thử lại</b>.</div>
+  <div class="tip">💡 Cần mạng lần đầu để tải thư viện OCR; sau đó quét nhanh dần. OCR chỉ là dự phòng — size chuẩn nhất vẫn là chạm tay (mục 📏).</div>
+</section>
+
+<section class="card" id="sec-size">
+  <h2>📏 Size thùng — chạm 1 lần ngay trong banner</h2>
+  <ol class="steps">
+    <li>Ngay trong banner xanh <b>"Đã ghi nhận"</b> có <b>dải 13 nút size</b> (3.0 – 9.0, bước 0.5): <b>chạm 1 lần</b> → gán size cho đúng thùng vừa quét.</li>
+    <li>Kế bên là bộ <b>− / +</b> chỉnh <b>số đôi/thùng</b> (mặc định 6).</li>
+    <li>Còn pad dự phòng cố định phía dưới thẻ quét cho trường hợp cần.</li>
+  </ol>
+  <div class="tip">💡 Đống tem <b>trộn size</b>: cứ quét → chạm size ngay trong banner, không cần cuộn trang. Chạm tay <b>luôn ghi đè</b> size cũ (kể cả size do 🤖 OCR đọc).</div>
+</section>
+
+<section class="card" id="sec-data">
+  <h2>🗂 Dữ liệu đã ghi nhận &amp; Báo cáo</h2>
+  <ol class="steps">
+    <li><b>Tìm kiếm:</b> ô tìm theo chỉ thị / PO / số thùng; lọc theo ngày.</li>
+    <li><b>Sửa:</b> bấm trực tiếp vào ô <b>PO</b> / <b>Size</b> trên bảng để sửa; nút <b>Xóa</b> để xóa từng dòng.</li>
+    <li><b>Xuất file:</b> ⬇ <b>Xuất Excel</b> (đúng mẫu: 1 sheet/ngày) · <b>CSV</b> · <b>JSON</b>.</li>
+    <li><b>📊 Báo cáo sản lượng:</b> chọn <b>Ngày</b> + <b>Nghiệp vụ</b> (Kiểm/Nhập/Xuất) + lọc pallet (để trống = tất cả) → <b>Xuất Excel</b> đúng mẫu xưởng: mỗi khoảng thùng 1 dòng, có dòng <b>Tổng</b> theo chỉ thị, tổng thùng/đôi ở góc phải.</li>
+    <li><b>📊 Tổng hợp theo nhân viên</b> 🛡: chọn ngày (mặc định hôm nay, nút ‹ ›) → mỗi người 1 dòng: Kiểm/Nhập/Xuất (<b>thùng · đôi</b>), số <b>pallet</b>, <b>tổng thùng</b>, <b>tổng đôi</b> + dòng <b>TỔNG CỘNG</b>. Tự refresh khi có quét mới.</li>
+  </ol>
+  <div class="tip">💡 Cột "Người quét" trong Excel/bảng hiện <b>tên nhân viên</b> (VD: Ms.Dung) thay cho user1 — do admin đặt trong <b>Quản lý tài khoản</b>.</div>
+</section>
+
+<section class="card" id="sec-admin">
+  <h2>🛡 Quản trị — kiểm soát web <small style="color:var(--muted);font-weight:400">(chỉ admin)</small></h2>
+  <ol class="steps">
+    <li><b>Quản lý tài khoản:</b> bấm vào ô <b>"Tên nhân viên / Mã NV"</b> để đặt tên (VD: <code>Ms.Dung</code>) — tên này hiện trên Excel, bảng dữ liệu, dashboard. Nút <b>đổi mật khẩu</b> cho từng user. Tài khoản hiện <i>"chưa kích hoạt"</i> = chưa đăng nhập lần nào.</li>
+    <li><b>Packing list:</b> <b>Import Excel</b> packing của xưởng (tự nhận diện sheet/cột tiếng Việt) hoặc thêm/sửa/xóa từng khoảng thùng (từ–đến, size, đôi/thùng, PO…). Packing là nguồn đúng nhất cho PO + size tự động.</li>
+    <li><b>Master data đơn hàng:</b> import file CSV <b>"ĐƠN ĐẶT HÀNG TVS"</b> để app tự tra PO theo chỉ thị.</li>
+    <li><b>Dashboard</b> 📊: KPI (thùng/đôi/pallet/người quét), biểu đồ theo ngày, tiến độ từng chỉ thị.</li>
+    <li><b>🗑 Xóa toàn bộ dữ liệu:</b> vùng nguy hiểm — phải gõ đúng <code>XÓA HẾT</code> mới xóa được, <b>không hoàn tác</b>.</li>
+  </ol>
+  <div class="warn">⚠️ Đổi mật khẩu mặc định của <code>admin</code> ngay sau khi nhận bàn giao. Không chia sẻ tài khoản admin — mỗi người 1 user riêng để báo cáo "Tổng hợp theo nhân viên" chính xác.</div>
+  <div class="tip">💡 Thứ tự ưu tiên dữ liệu tự động: <b>Packing list → 🤖 OCR → nhập tay</b>. Giữ packing đầy đủ thì công nhân gần như chỉ cần quét + chạm size.</div>
+</section>
+
+<footer>QuetDoc QRcode · <b>v6.9</b> · <i>Quét là ghi.</i></footer>
+</div>
+
+<script>
+document.querySelectorAll(".branch").forEach(function(g){
+  g.addEventListener("click", function(){
+    var el = document.getElementById(g.dataset.target);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+});
+</script>
+</body>
+</html>

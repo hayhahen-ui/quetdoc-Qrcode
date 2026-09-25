@@ -78,6 +78,12 @@ button.primary:hover:not(:disabled){filter:brightness(1.12);background:linear-gr
 button.danger:hover:not(:disabled){color:#fecaca;border-color:rgba(248,113,113,.4);background:rgba(248,113,113,.1)}
 button.on{border-color:rgba(16,185,129,.55);color:#6ee7b7}
 button.small{min-height:36px;padding:0 11px;font-size:12.5px}
+/* v6.9: nút Hướng dẫn (thẻ a) — nhìn và bấm như button.small */
+a.small{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:0 11px;
+  font-size:12.5px;font-weight:650;border-radius:var(--r-md);border:1px solid var(--border);
+  background:var(--elev);color:var(--text);text-decoration:none;white-space:nowrap}
+a.small:hover{background:#1f2a3d}
+a.small:active{transform:scale(.98)}
 /* v6.0: nút quét chính — vùng ngón cái, 1 chạm */
 #btnStart{min-height:var(--touch-lg);font-size:16px;font-weight:700;flex:1 1 200px;letter-spacing:-.2px}
 :focus-visible{outline:2px solid var(--info);outline-offset:2px}

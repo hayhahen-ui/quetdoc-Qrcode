@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0B0E13">
 <meta name="description" content="QuetDoc QRcode — Quét mã QR/barcode bằng camera và ghi nhận dữ liệu, phân quyền quản trị / nhân viên.">
 <title>QuetDoc QRcode · Quét mã & ghi nhận dữ liệu</title>
-<link rel="stylesheet" href="assets/css/styles.css?v=6.8.1">
+<link rel="stylesheet" href="assets/css/styles.css?v=6.9">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" async></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" async></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" async></script>
@@ -54,6 +54,7 @@
     </div>
     <div class="chips">
       <span class="chip userchip">👤 <b id="chipName">—</b> <span class="role user" id="chipRole"></span></span>
+      <a class="small" id="btnGuide" href="guide.html" target="_blank" rel="noopener" title="Hướng dẫn sử dụng">📖 Hướng dẫn</a>
       <span class="chip" id="httpsStatus">…</span>
       <span class="chip" id="camStatus">…</span>
       <button class="small" id="btnLogout">Đăng xuất</button>
@@ -316,7 +317,7 @@
   </section>
 
   <footer>
-    QuetDoc QRcode · <b>v6.8.1</b> · đồng bộ Supabase (đa thiết bị).<br>
+    QuetDoc QRcode · <b>v6.9</b> · đồng bộ Supabase (đa thiết bị).<br>
     💡 Mẹo: mở trang bằng <b>HTTPS</b> thì trình duyệt mới cho phép dùng camera.
   </footer>
 </div>
@@ -335,6 +336,6 @@
 </div>
 
 <div id="toasts"></div>
-<script src="assets/js/app.js?v=6.8.1" defer></script>
+<script src="assets/js/app.js?v=6.9" defer></script>
 </body>
 </html>
