@@ -48,6 +48,7 @@ const state = {
   cameraId: null,
   camManual: false,     // true khi user tự chọn camera trong dropdown
   realFacing: "",       // facingMode THỰC TẾ đọc từ camera track ("environment"/"user")
+  displayNames: {},     // v6.5: username (lowercase) -> tên NV/mã NV cho cột "Người quét"
   torchOn: false,
   lastContent: "",
   lastAt: 0,
@@ -222,6 +223,7 @@ async function enterApp() {
     : "Bạn chỉ xem được các mã do chính mình quét. Bấm vào ô PO / Size để sửa.";
   state.page = 0;
   renderHead();
+  loadDisplayNames(); // v6.5: mapping tên NV cho cột "Người quét" (không chặn UI)
   try {
     await loadRecords();
     await loadMaster();
@@ -625,7 +627,7 @@ function showDupBox(dup, content) {
   box.classList.add("dup");
   box.innerHTML = "⚠️ <b>Đã được quét</b> — mã này đã ghi nhận trước đó nên bỏ qua.<br>" +
     "<code>" + esc(content) + "</code><br><span class='muted'>" +
-    (dup ? "Ghi nhận lần đầu: " + fmtTime(dup.scannedAt) + (dup.username ? " · bởi <b>" + esc(dup.username) + "</b>" : "")
+    (dup ? "Ghi nhận lần đầu: " + fmtTime(dup.scannedAt) + (dup.username ? " · bởi <b>" + esc(dName(dup.username)) + "</b>" : "") // v6.5
          : "Máy chủ đã có mã này.") + "</span>";
   box.classList.add("show");
   beepDup();
@@ -916,7 +918,7 @@ function renderDashboard(d) {
   // Theo người quét
   const users = [...d.byUser.entries()].sort((a, b) => b[1].n - a[1].n);
   $("dashUsers").querySelector("tbody").innerHTML = users.length ? users.map(([u, r]) =>
-    "<tr><td><b>" + esc(u) + "</b></td><td>" + num(r.n) + "</td><td>" + num(r.pairs) +
+    "<tr><td><b>" + esc(dName(u)) + "</b></td><td>" + num(r.n) + "</td><td>" + num(r.pairs) + // v6.5
     "</td><td>" + num(r.pallets.size) + "</td><td class='muted'>" + fmtTime(r.last) + "</td></tr>").join("")
     : '<tr><td colspan="5" class="muted">Chưa có số liệu.</td></tr>';
   // Theo chỉ thị: tiến độ vs kế hoạch packing + ngày xuất/quốc gia từ master
@@ -976,7 +978,7 @@ function renderTable() {
           (r.note ? "<br><span class='muted'>" + esc(r.note) + "</span>" : "") + "</td>" +
         "<td class='muted' style='white-space:nowrap'>" + fmtTime(r.scannedAt) + "</td>" +
         "<td>" + esc(r.session || "") + "</td>" +
-        (admin ? "<td><b>" + esc(r.username || "—") + "</b></td>" : "") +
+        (admin ? "<td><b>" + esc(dName(r.username)) + "</b></td>" : "") + // v6.5
         "<td><button class='small danger' data-del='" + r.id + "'>Xóa</button></td>" +
         "</tr>";
     }).join("");
@@ -1047,6 +1049,29 @@ function buildRoster(profiles) {
   return names.map((n) => ({ username: n, profile: byName[n] || null }));
 }
 
+/* ---- v6.5: mapping tên nhân viên vào cột "Người quét" ----
+ * displayNames: username (viết thường) -> display_name (Tên NV/Mã NV).
+ * Admin đọc được tất cả (policy profiles_admin_select); user thường chỉ đọc
+ * được dòng của mình (profiles_self) — nhưng bản ghi họ thấy cũng chỉ của họ
+ * nên vẫn mapping đúng. Chỗ nào chưa có tên thì giữ nguyên username. */
+async function loadDisplayNames() {
+  if (!supa) return;
+  try {
+    const { data } = await supa.from("profiles").select("username,display_name");
+    const m = {};
+    (data || []).forEach((p) => {
+      const dn = (p.display_name || "").trim();
+      if (dn && p.username) m[String(p.username).toLowerCase()] = dn;
+    });
+    state.displayNames = m;
+  } catch (e) {}
+}
+// Tên hiển thị cho "Người quét": tên NV nếu có, không thì username gốc
+function dName(u) {
+  u = (u || "").trim();
+  if (!u) return "—";
+  return state.displayNames[u.toLowerCase()] || u;
+}
 async function loadAccounts() {
   if (!isAdmin() || !supa) return;
   const body = $("usersBody");
@@ -1054,6 +1079,13 @@ async function loadAccounts() {
     const { data, error } = await supa.from("profiles")
       .select("id,username,role,display_name,created_at").order("username");
     if (error) throw error;
+    // v6.5: dựng lại map tên NV sau khi admin sửa (đổi tên xong là báo cáo dùng ngay)
+    const m = {};
+    (data || []).forEach((p) => {
+      const dn = (p.display_name || "").trim();
+      if (dn && p.username) m[String(p.username).toLowerCase()] = dn;
+    });
+    state.displayNames = m;
     const counts = {};
     state.records.forEach((r) => { if (r.userId) counts[r.userId] = (counts[r.userId] || 0) + 1; });
     const meId = state.me && state.me.id;
@@ -1699,7 +1731,7 @@ function computeReport(dayRows) {
       }
       const boxes = [...boxSet].sort((a, b) => a - b);
       rows.push({ rg: rg, p: p, q: p * (rg.doi_thung || 0), left: (rg.so_thung || 0) - p,
-        boxes: boxes, users: [...userSet].sort().join(", ") });
+        boxes: boxes, users: [...userSet].sort().map(dName).join(", ") }); // v6.5: tên NV thay vì user1
     });
   });
   return { rows: rows, noPack: noPack, totalScans: seen.size };
@@ -1917,7 +1949,7 @@ async function exportExcel() {
       groups[day].slice().sort((a, b) => new Date(a.scannedAt) - new Date(b.scannedAt))
         .forEach((r, i) => {
           const row = ws.addRow([i + 1, r.chiThi || "", r.po || "", r.size || "",
-            r.content || "", r.session || "", fmtTimeOnly(r.scannedAt), r.username || ""]);
+            r.content || "", r.session || "", fmtTimeOnly(r.scannedAt), dName(r.username)]); // v6.5
           row.eachCell((cell, cn) => xlBodyCell(cell, cn === 1 || cn === 7));
         });
     });
