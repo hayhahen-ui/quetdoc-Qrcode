@@ -1444,17 +1444,19 @@ async function exportReport(day, palletQ) {
     cell.border = xlBorder();
   }
   hr.height = 22;
-  // Dữ liệu: 2 cột đếm tô xanh; cột "số thứ tự thùng" liệt kê các số thùng đã quét
+  // Dữ liệu: 2 cột đếm tô xanh; cột M: "002,003,004 = 3 thùng" (số in trên tem)
   rows.forEach((it, i) => {
     const g = it.rg;
-    const boxStr = (it.boxes || []).map((n) => String(n).padStart(3, "0")).join("\n");
+    const boxStr = it.boxes.length
+      ? it.boxes.map((n) => String(n).padStart(3, "0")).join(",") + " = " + it.boxes.length + " thùng"
+      : "";
     const row = ws.addRow([i + 1, g.chi_thi, g.po || "", g.art || "",
       +g.size || g.size, g.tong_doi || 0, g.doi_thung || 0, g.so_thung || 0,
       g.thung_tu, g.thung_den, it.p, it.q, boxStr]);
     row.eachCell((cell, cn) => {
       xlBodyCell(cell, cn !== 3 && cn !== 4);
       if (cn === NC - 2 || cn === NC - 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: GREEN } };
-      if (cn === NC) { cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true }; row.height = Math.max(18, it.boxes.length * 15); }
+      if (cn === NC) { cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true }; row.height = Math.max(18, Math.ceil(boxStr.length / 28) * 15); }
     });
   });
   if (rep.noPack.length) {
