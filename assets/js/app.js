@@ -12,7 +12,7 @@ const TZ = "Asia/Ho_Chi_Minh";
 
 /* ---------------- Supabase (đồng bộ cloud đa thiết bị) ---------------- */
 const SUPABASE_URL = "https://cdxoaoemnidwuzentxrc.supabase.co";
-const SUPABASE_ANON_KEY = "__SUPABASE_ANON_KEY__"; // TODO: dán anon key vào trước khi deploy
+const SUPABASE_ANON_KEY = "sb_publishable_IIXJQBX31Krk32yyU1Fp2Q_4BlwGJKx";
 const EMAIL_DOMAIN = "quetdoc.local"; // user1 -> user1@quetdoc.local (email nội bộ)
 const emailOf = (u) => String(u || "").trim().toLowerCase() + "@" + EMAIL_DOMAIN;
 
