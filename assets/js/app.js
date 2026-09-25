@@ -698,12 +698,16 @@ function stats() {
   return { total: list.length, today, uniq, dup: state.dupSkipped || 0 };
 }
 
+function refreshReportBtn() {
+  const b = $("btnExportReport");
+  if (b) b.disabled = !state.packingReady || !state.packing.length; // v5.0: cần packing list
+}
 function renderAll() {
   if (!state.me) { doLogout(); return; }
   renderStats(); renderTable();
   const n = visibleRecords().length;
   $("btnExportXlsx").disabled = $("btnExportCsv").disabled = $("btnExportJson").disabled = $("btnClear").disabled = !n;
-  $("btnExportReport").disabled = !state.packingReady || !state.packing.length; // v5.0: cần packing list
+  refreshReportBtn();
 }
 
 function renderStats() {
@@ -1064,6 +1068,7 @@ async function loadPacking() {
     }
   }
   if (isAdmin()) renderPacking();
+  refreshReportBtn(); // v5.1.1: bật nút báo cáo ngay khi packing tải xong
 }
 function setPacking(rows) {
   state.packing = rows;
