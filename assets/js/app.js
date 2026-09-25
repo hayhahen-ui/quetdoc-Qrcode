@@ -1546,17 +1546,25 @@ async function importPackingXlsx(file) {
  * đã quét nằm trong [thung_tu, thung_den] (P), số đôi đã quét Q = P × doi_thùng.
  * Dòng còn thiếu (Còn lại > 0) được tô đỏ để dễ phát hiện. */
 function openReportModal() {
+  // v5.5: lọc theo nghiệp vụ (Kiểm/Nhập/Xuất) — mặc định lấy loại pallet
+  // đang chọn ở phiên quét trên màn hình quét (mapping từ ô khởi tạo).
+  const curType = (getSession().type || "");
+  const opts = [["", "Tất cả"], ["Kiểm", "Kiểm"], ["Nhập", "Nhập"], ["Xuất", "Xuất"]];
   openModal("📊 Báo cáo sản lượng",
     "<div class='field'><label>Ngày báo cáo</label><input type='date' id='rpDate' value='" + todayStr() + "'></div>" +
+    "<div class='field'><label>Nghiệp vụ</label><select id='rpType'>" +
+    opts.map(([v, l]) => "<option value='" + v + "'" + (v === curType ? " selected" : "") + ">" + l + "</option>").join("") +
+    "</select></div>" +
     "<div class='field'><label>Lọc số pallet (để trống = tất cả)</label>" +
     "<input id='rpPallet' placeholder='VD: NK'></div>" +
     "<p class='sec-hint'>Mỗi khoảng thùng 1 dòng theo đúng mẫu packing list. " +
     (isAdmin() ? "Báo cáo tính trên toàn bộ bản ghi." : "Báo cáo chỉ tính các mã do bạn quét.") + "</p>",
     "Xuất Excel", async () => {
       const day = $("rpDate").value || todayStr();
+      const typeQ = ($("rpType").value || "").trim().toLowerCase();
       const pq = ($("rpPallet").value || "").trim().toLowerCase();
       closeModal();
-      await exportReport(day, pq);
+      await exportReport(day, pq, typeQ);
     });
 }
 /* Lấy toàn bộ bản ghi của 1 ngày (giờ VN) trực tiếp từ server —
@@ -1616,7 +1624,7 @@ function computeReport(dayRows) {
  * - "số lượng" (Q) = P × Số đôi/thùng
  * - Chỉ hiện khoảng có quét (P > 0), đúng mẫu báo cáo cũ của xưởng.
  * - Mapping số thùng: QR 0-index + 1 = packing 1-index (đã kiểm chứng khớp mẫu cũ). */
-async function exportReport(day, palletQ) {
+async function exportReport(day, palletQ, typeQ) {
   if (!state.packingReady || !state.packing.length) {
     toast("Chưa có packing list. Admin hãy chạy migration-v5.0.sql hoặc import Excel packing.", "warn"); return;
   }
@@ -1627,6 +1635,8 @@ async function exportReport(day, palletQ) {
   let dayRows;
   try { dayRows = await fetchDayRecords(day); }
   catch (e) { toast("Không tải được bản ghi: " + (e.message || e), "err"); return; }
+  // v5.5: lọc nghiệp vụ theo loại pallet của phiên quét ("Kiểm 1", "Nhập 2", "Xuất 3")
+  if (typeQ) dayRows = dayRows.filter((r) => (r.session || "").toLowerCase().startsWith(typeQ));
   if (palletQ) dayRows = dayRows.filter((r) => (r.session || "").toLowerCase().includes(palletQ));
   const rep = computeReport(dayRows);
   const rows = rep.rows.filter((it) => it.p > 0); // đúng mẫu xưởng: chỉ khoảng có quét
@@ -1647,7 +1657,12 @@ async function exportReport(day, palletQ) {
   const dstr = day.split("-").reverse().join("/");
   ws.mergeCells(1, 1, 1, 10);
   const tc = ws.getCell(1, 1);
-  tc.value = "BÁO CÁO NHẬP KHO : " + dstr + (palletQ ? " · pallet: " + palletQ : "");
+  // v5.5: tiêu đề + tên file theo nghiệp vụ
+  const KIND = { "kiểm": ["BÁO CÁO KIỂM KHO", "Bao_Cao_Kiem_Kho"],
+    "nhập": ["BÁO CÁO NHẬP KHO", "Bao_Cao_Nhap_Kho"],
+    "xuất": ["BÁO CÁO XUẤT KHO", "Bao_Cao_Xuat_Kho"] }[typeQ] ||
+    ["BÁO CÁO NHẬP KHO", "Bao_Cao_Nhap_Kho"];
+  tc.value = KIND[0] + " : " + dstr + (palletQ ? " · pallet: " + palletQ : "");
   tc.font = { name: "Arial", size: 14, bold: true };
   tc.alignment = { horizontal: "center", vertical: "middle" };
   ws.getRow(1).height = 26;
@@ -1704,8 +1719,8 @@ async function exportReport(day, palletQ) {
   }
   const stamp = day.replace(/-/g, "") + "_" +
     new Date().toLocaleTimeString("vi-VN", { timeZone: TZ, hour12: false }).replace(/:/g, "");
-  xlDownload(await wb.xlsx.writeBuffer(), "Bao_Cao_Nhap_Kho_" + stamp + ".xlsx");
-  toast("Đã xuất báo cáo nhập kho (" + rows.length + " khoảng, " + sP + " thùng, " + sQ + " đôi).", "ok");
+  xlDownload(await wb.xlsx.writeBuffer(), KIND[1] + "_" + stamp + ".xlsx");
+  toast("Đã xuất " + KIND[0].toLowerCase() + " (" + rows.length + " khoảng, " + sP + " thùng, " + sQ + " đôi).", "ok");
 }
 
 /* Xóa TOÀN BỘ bản ghi quét của mọi tài khoản (chỉ admin).
