@@ -2039,7 +2039,32 @@ function setHttpsChip() {
   c.className = "chip " + (secure ? "ok" : "warn");
 }
 
+/* v6.6: chỉ đổi nhãn "— đang dùng" trên dropdown camera, KHÔNG động vào phần cứng.
+ * (Trước đây gọi listCameras() ở đây -> Html5Qrcode.getCameras() mở getUserMedia
+ * "dùng 1 lần" rồi stop track; trên iOS việc này giết luôn stream đang quét
+ * -> video đen vĩnh viễn. Dropdown đang disabled khi quét nên cũng không cần
+ * tải lại danh sách.) */
+function markActiveCameraOption() {
+  try {
+    const sel = $("cameraSelect");
+    if (!sel) return;
+    if (state.cameraId) {
+      const has = Array.prototype.some.call(sel.options, (o) => o.value === state.cameraId);
+      if (has) sel.value = state.cameraId;
+    }
+    const opt = sel.selectedOptions && sel.selectedOptions[0];
+    if (!opt) return;
+    const base = opt.textContent.replace(/ — đang dùng$/, "").replace(/^[📷🤳] /, "");
+    if (state.realFacing === "environment") opt.textContent = "📷 " + base + " — đang dùng";
+    else if (state.realFacing === "user") opt.textContent = "🤳 " + base + " — đang dùng";
+  } catch (e) {}
+}
 async function listCameras() {
+  // v6.6: TUYỆT ĐỐI không liệt kê lại khi đang quét — Html5Qrcode.getCameras()
+  // mở một getUserMedia "dùng 1 lần" rồi stop track; trên iOS (Safari/Chrome)
+  // việc này giết luôn stream camera đang quét -> video đen vĩnh viễn.
+  // Android chịu được nên trước đây không lộ bệnh.
+  if (state.scanning) return;
   // Thư viện CDN nạp async nên có thể chưa sẵn sàng lúc init: đợi tối đa ~10s
   const prev = state.cameras || [];
   state.cameras = [];
@@ -2245,9 +2270,9 @@ async function startScan() {
     $("cameraSelect").disabled = true;
     setCamStatus("🟢 <b>Đang quét</b> — hướng camera vào mã", "ok");
     updateTorchBtn(); updateZoomCtl();
-    // Sau khi cấp quyền, trình duyệt mới hiện tên camera thật -> tải lại để dropdown
-    // hiện đúng tên và trỏ đúng camera đang dùng. Đọc facingMode thực tế từ track
-    // (nhãn enumerateDevices đôi khi sai trên một số máy Android).
+    // Sau khi cấp quyền, đọc facingMode thực tế từ track (nhãn enumerateDevices
+    // đôi khi sai trên một số máy Android) để đổi nhãn dropdown + kiểm chứng
+    // camera trước/sau. v6.6: KHÔNG gọi listCameras() ở đây nữa.
     try {
       const video = document.querySelector("#reader video");
       const tr = video && video.srcObject ? video.srcObject.getVideoTracks()[0] : null;
@@ -2259,7 +2284,7 @@ async function startScan() {
     if (!state.camManual && state.realFacing === "user") {
       toast("Máy đã mở nhầm camera trước. Hãy mở danh sách camera, chọn camera sau (facing back) rồi bấm quét lại.", "warn");
     }
-    listCameras();
+    markActiveCameraOption(); // v6.6: chỉ đổi nhãn dropdown, không gọi listCameras() (giết camera trên iOS)
   } catch (e) {
     stopWatchVideoElement();
     setCamStatus("🔴 Không mở được camera", "warn");
