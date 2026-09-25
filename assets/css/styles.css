@@ -165,3 +165,23 @@ td.editable:hover{background:rgba(245,158,11,.14)}
 .szstrip .sizepad{grid-template-columns:repeat(7,1fr)}
 .szstrip .szbtn{padding:10px 0;font-size:14px;font-weight:600}
 #pairsVal{min-width:20px;text-align:center}
+
+/* v5.4: dashboard sản lượng */
+.dashhead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px}
+.dashgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:10px 0 4px}
+.dkpi{background:var(--elev);border:1px solid var(--border);border-radius:12px;padding:12px 14px;position:relative;overflow:hidden}
+.dkpi i{position:absolute;left:0;top:0;bottom:0;width:4px}
+.dkpi .l{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.dkpi .v{font-size:26px;font-weight:800;margin:4px 0;font-variant-numeric:tabular-nums}
+.dkpi .h{font-size:11px;color:var(--muted)}
+.dashcols{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:900px){.dashcols{grid-template-columns:1fr}}
+.dash-h{font-size:14px;margin:16px 0 8px}
+.barchart{display:flex;align-items:flex-end;gap:3px;height:150px;padding:10px 8px 4px;background:var(--elev);border:1px solid var(--border);border-radius:10px}
+.bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:0}
+.barv{width:70%;max-width:24px;background:linear-gradient(180deg,var(--emerald),#059669);border-radius:4px 4px 0 0;min-height:2px}
+.barv.zero{background:rgba(100,116,139,.25)}
+.barl{font-size:9px;color:var(--muted);margin-top:4px;white-space:nowrap}
+.prog{height:8px;background:rgba(100,116,139,.25);border-radius:99px;overflow:hidden;min-width:90px}
+.prog > div{height:100%;background:linear-gradient(90deg,var(--blue),var(--emerald));border-radius:99px}
+.prog.full > div{background:linear-gradient(90deg,var(--emerald),#a7f3d0)}

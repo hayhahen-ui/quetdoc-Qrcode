@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0A0D14">
 <meta name="description" content="QuetDoc QRcode — Quét mã QR/barcode bằng camera và ghi nhận dữ liệu, phân quyền quản trị / nhân viên.">
 <title>QuetDoc QRcode · Quét mã & ghi nhận dữ liệu</title>
-<link rel="stylesheet" href="assets/css/styles.css?v=5.3">
+<link rel="stylesheet" href="assets/css/styles.css?v=5.4">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" async></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" async></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" async></script>
@@ -59,11 +59,31 @@
     </div>
   </header>
 
-  <section class="kpis">
-    <div class="card kpi"><i style="background:var(--blue)"></i><div class="l">Tổng lượt quét</div><div class="v" id="kpiTotal">0</div><div class="h">mọi thời điểm</div></div>
-    <div class="card kpi"><i style="background:var(--emerald)"></i><div class="l">Hôm nay</div><div class="v" id="kpiToday">0</div><div class="h">theo giờ Việt Nam</div></div>
-    <div class="card kpi"><i style="background:var(--amber)"></i><div class="l">Mã duy nhất</div><div class="v" id="kpiUniq">0</div><div class="h">mỗi mã ghi 1 lần</div></div>
-    <div class="card kpi"><i style="background:var(--red)"></i><div class="l">Bỏ qua trùng</div><div class="v" id="kpiDup">0</div><div class="h">mã đã quét trước đó</div></div>
+  <section class="card pad" id="dashCard">
+    <div class="dashhead">
+      <h2 class="sec-title" style="margin:0">📊 Dashboard sản lượng</h2>
+      <button class="small" id="btnDashRefresh">🔄 Làm mới</button>
+    </div>
+    <p class="sec-hint" id="dashNote">Đang tải số liệu…</p>
+    <div class="dashgrid" id="dashKpis"></div>
+    <div class="dashcols">
+      <div>
+        <h3 class="dash-h">📈 Số thùng quét theo ngày <span class="muted" style="font-weight:400">(14 ngày gần nhất)</span></h3>
+        <div class="barchart" id="dashChart"></div>
+      </div>
+      <div>
+        <h3 class="dash-h">👷 Sản lượng theo người quét</h3>
+        <div style="overflow-x:auto"><table id="dashUsers">
+          <thead><tr><th>Người quét</th><th>Số thùng</th><th>Số đôi</th><th>Pallet</th><th>Lần cuối</th></tr></thead>
+          <tbody><tr><td colspan="5" class="muted">—</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+    <h3 class="dash-h">📦 Tiến độ theo chỉ thị <span class="muted" style="font-weight:400">(kế hoạch từ packing · ngày xuất &amp; quốc gia từ master đơn hàng)</span></h3>
+    <div style="overflow-x:auto"><table id="dashDirs">
+      <thead><tr><th>Chỉ thị</th><th>PO</th><th>Quốc gia</th><th>Ngày xuất</th><th>Đã quét / Kế hoạch</th><th>Tiến độ</th><th>Số đôi</th></tr></thead>
+      <tbody><tr><td colspan="7" class="muted">—</td></tr></tbody>
+    </table></div>
   </section>
 
   <div class="grid2">
@@ -270,7 +290,7 @@
   </section>
 
   <footer>
-    QuetDoc QRcode · <b>v5.3</b> · đồng bộ Supabase (đa thiết bị).<br>
+    QuetDoc QRcode · <b>v5.4</b> · đồng bộ Supabase (đa thiết bị).<br>
     💡 Mẹo: mở trang bằng <b>HTTPS</b> thì trình duyệt mới cho phép dùng camera.
   </footer>
 </div>
@@ -289,6 +309,6 @@
 </div>
 
 <div id="toasts"></div>
-<script src="assets/js/app.js?v=5.3" defer></script>
+<script src="assets/js/app.js?v=5.4" defer></script>
 </body>
 </html>

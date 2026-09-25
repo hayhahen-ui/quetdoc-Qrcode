@@ -39,6 +39,7 @@ async function ensureSupa() {
 const state = {
   records: [],          // [{id, content, format, scannedAt, session, note, userId, username}]
   dupSkipped: 0,        // số lượt quét trùng đã bỏ qua
+  dash: null,           // v5.4: cache số liệu dashboard {rows, at}
   settings: { session: "", note: "", sound: true, sizeUK: "", pairs: 6 },
   me: null,             // user đang đăng nhập {id, username, role}
   scanning: false,
@@ -229,6 +230,7 @@ async function enterApp() {
     toast("Không tải được dữ liệu: " + (e.message || e), "err");
   }
   refreshSession(); // v5.3: đối chiếu phiên quét với dữ liệu vừa tải + bật/tắt nút quét
+  refreshDashboard(); // v5.4: tải số liệu dashboard (không chặn UI)
 }
 
 /* ---------------- realtime: tự cập nhật khi máy khác quét ---------------- */
@@ -523,6 +525,11 @@ async function addRecord(content, format) {
   };
   state.records.unshift(rec);
   state.page = 0;
+  // v5.4: cập nhật dashboard ngay (không chờ tải lại DB)
+  if (state.dash && state.dash.rows) state.dash.rows.unshift({
+    content: rec.content, chiThi: rec.chiThi, scannedAt: rec.scannedAt,
+    session: rec.session, username: rec.username, size: rec.size,
+  });
   renderAll();
   showOkBox(rec);
   beep(true);
@@ -696,15 +703,6 @@ function filteredRecords() {
   });
 }
 
-function stats() {
-  const list = visibleRecords();
-  const t = todayStr();
-  const today = list.filter((r) =>
-    new Date(r.scannedAt).toLocaleDateString("en-CA", { timeZone: TZ }) === t).length;
-  const uniq = new Set(list.map((r) => norm(r.content))).size;
-  return { total: list.length, today, uniq, dup: state.dupSkipped || 0 };
-}
-
 function refreshReportBtn() {
   const b = $("btnExportReport");
   if (b) b.disabled = !state.packingReady || !state.packing.length; // v5.0: cần packing list
@@ -822,12 +820,128 @@ function renderAll() {
   refreshReportBtn();
 }
 
+/* v5.4: DASHBOARD sản lượng — số thùng, số đôi, pallet, người quét,
+ * biểu đồ theo ngày, tiến độ chỉ thị (ngày xuất/quốc gia từ master). */
+function boxPairs(chiThi, content, sizeStr) {
+  const p = packingLookup(chiThi, content);
+  if (p && +p.doi_thung > 0) return +p.doi_thung;
+  const m = /(\d+(?:\.\d+)?)-(\d+)/.exec(sizeStr || "");
+  return m ? +m[2] : 0;
+}
+async function loadDashRows() {
+  // Tải toàn bộ bản ghi (cột nhẹ) để tính dashboard — phân trang 1000.
+  if (!supa || !state.me) return [];
+  const cols = schemaV4 ? "content,chi_thi,scanned_at,session,username,size" : "content,scanned_at,session,username";
+  const all = [];
+  try {
+    for (let from = 0; ; from += 1000) {
+      let q = supa.from("records").select(cols).order("scanned_at", { ascending: false }).range(from, from + 999);
+      if (!isAdmin()) q = q.eq("user_id", state.me.id);
+      const { data, error } = await q;
+      if (error) throw error;
+      (data || []).forEach((d) => all.push({
+        content: d.content || "",
+        chiThi: d.chi_thi || parseChiThi(d.content || ""),
+        scannedAt: d.scanned_at, session: d.session || "",
+        username: d.username || "", size: d.size || "",
+      }));
+      if (!data || data.length < 1000 || all.length >= 20000) break;
+    }
+  } catch (e) { console.warn("Không tải được số liệu dashboard:", e.message); }
+  return all;
+}
+function computeDash(rows) {
+  const seen = new Map(); // dedupe theo mã thùng
+  rows.forEach((r) => { const k = norm(r.content); if (k && !seen.has(k)) seen.set(k, r); });
+  const t = todayStr();
+  let pairs = 0, today = 0;
+  const pallets = new Set(), users = new Set(), byDay = new Map(), byUser = new Map(), byChi = new Map();
+  seen.forEach((r) => {
+    const pr = boxPairs(r.chiThi, r.content, r.size);
+    pairs += pr;
+    if (r.session && r.session.trim()) pallets.add(r.session.trim());
+    if (r.username) users.add(r.username);
+    const day = new Date(r.scannedAt).toLocaleDateString("en-CA", { timeZone: TZ });
+    if (day === t) today++;
+    byDay.set(day, (byDay.get(day) || 0) + 1);
+    const u = r.username || "(không tên)";
+    const ur = byUser.get(u) || { n: 0, pairs: 0, pallets: new Set(), last: "" };
+    ur.n++; ur.pairs += pr;
+    if (r.session && r.session.trim()) ur.pallets.add(r.session.trim());
+    if (!ur.last || r.scannedAt > ur.last) ur.last = r.scannedAt;
+    byUser.set(u, ur);
+    const c = (r.chiThi || "").toUpperCase() || "(lạ)";
+    const cr = byChi.get(c) || { n: 0, pairs: 0 };
+    cr.n++; cr.pairs += pr;
+    byChi.set(c, cr);
+  });
+  return { total: rows.length, boxes: seen.size, pairs, today,
+    pallets: pallets.size, users: users.size, byDay, byUser, byChi };
+}
+function dirPlan(chi) {
+  // Kế hoạch từ packing + thông tin đơn hàng từ master
+  let plan = 0, po = "";
+  (state.packingByChi.get(chi) || []).forEach((r) => { plan += +r.so_thung || 0; if (!po && r.po) po = r.po; });
+  const m = state.master[chi];
+  if (m && m.po && !po) po = m.po;
+  const mr = m && m.rows && m.rows[0];
+  return { plan, po, quocGia: (mr && mr.quoc_gia) || "", ngayXuat: (mr && mr.ngay_xuat_kd) || "" };
+}
+function renderDashboard(d) {
+  const num = (n) => (+n || 0).toLocaleString("vi-VN");
+  const kpis = [
+    ["var(--blue)", "Số thùng đã quét", num(d.boxes), "mã duy nhất"],
+    ["var(--emerald)", "Sản lượng đôi", num(d.pairs), "tổng số đôi"],
+    ["var(--amber)", "Số pallet", num(d.pallets), "phiên quét khác nhau"],
+    ["#a78bfa", "Người quét", num(d.users), "tài khoản tham gia"],
+    ["#38bdf8", "Hôm nay", num(d.today), "thùng quét hôm nay"],
+    ["var(--red)", "Bỏ qua trùng", num(state.dupSkipped || 0), "mã đã quét trước đó"],
+  ];
+  $("dashKpis").innerHTML = kpis.map(([c, l, v, h]) =>
+    '<div class="dkpi"><i style="background:' + c + '"></i><div class="l">' + l +
+    '</div><div class="v">' + v + '</div><div class="h">' + h + "</div></div>").join("");
+  // Biểu đồ 14 ngày gần nhất
+  const days = [];
+  for (let i = 13; i >= 0; i--) {
+    const dt = new Date(Date.now() - i * 864e5);
+    const k = dt.toLocaleDateString("en-CA", { timeZone: TZ });
+    days.push({ k, label: k.slice(8) + "/" + k.slice(5, 7), v: d.byDay.get(k) || 0 });
+  }
+  const max = Math.max(1, ...days.map((x) => x.v));
+  $("dashChart").innerHTML = days.map((x) =>
+    '<div class="bar" title="' + x.k + ": " + x.v + ' thùng"><div class="barv' + (x.v ? "" : " zero") +
+    '" style="height:' + Math.max(x.v ? 4 : 2, Math.round(x.v / max * 100)) + '%"></div>' +
+    '<div class="barl">' + x.label + "</div></div>").join("");
+  // Theo người quét
+  const users = [...d.byUser.entries()].sort((a, b) => b[1].n - a[1].n);
+  $("dashUsers").querySelector("tbody").innerHTML = users.length ? users.map(([u, r]) =>
+    "<tr><td><b>" + esc(u) + "</b></td><td>" + num(r.n) + "</td><td>" + num(r.pairs) +
+    "</td><td>" + num(r.pallets.size) + "</td><td class='muted'>" + fmtTime(r.last) + "</td></tr>").join("")
+    : '<tr><td colspan="5" class="muted">Chưa có số liệu.</td></tr>';
+  // Theo chỉ thị: tiến độ vs kế hoạch packing + ngày xuất/quốc gia từ master
+  const dirs = [...d.byChi.entries()].sort((a, b) => b[1].n - a[1].n);
+  $("dashDirs").querySelector("tbody").innerHTML = dirs.length ? dirs.map(([c, r]) => {
+    const pl = dirPlan(c);
+    const pct = pl.plan > 0 ? Math.min(100, Math.round(r.n / pl.plan * 100)) : 0;
+    return "<tr><td><b>" + esc(c) + "</b></td><td>" + esc(pl.po || "—") + "</td><td>" + esc(pl.quocGia || "—") +
+      "</td><td class='muted'>" + esc(pl.ngayXuat || "—") + "</td><td>" + num(r.n) + " / " + (pl.plan ? num(pl.plan) : "?") +
+      "</td><td><div class='prog" + (pct >= 100 ? " full" : "") + "' title='" + pct + "%'><div style='width:" + pct + "%'></div></div></td>" +
+      "<td>" + num(r.pairs) + "</td></tr>";
+  }).join("") : '<tr><td colspan="7" class="muted">Chưa có số liệu.</td></tr>';
+  const at = new Date().toLocaleTimeString("vi-VN", { timeZone: TZ, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  $("dashNote").textContent = "Tính trên " + num(d.total) + " lượt quét (" + num(d.boxes) + " mã duy nhất)" +
+    (isAdmin() ? "" : " — tài khoản của bạn") + " · cập nhật lúc " + at + ".";
+}
+async function refreshDashboard() {
+  const note = $("dashNote");
+  if (note) note.textContent = "Đang tải số liệu…";
+  const rows = await loadDashRows();
+  state.dash = { rows, at: Date.now() };
+  renderDashboard(computeDash(rows));
+}
 function renderStats() {
-  const s = stats();
-  $("kpiTotal").textContent = s.total.toLocaleString("vi-VN");
-  $("kpiToday").textContent = s.today.toLocaleString("vi-VN");
-  $("kpiUniq").textContent = s.uniq.toLocaleString("vi-VN");
-  $("kpiDup").textContent = s.dup.toLocaleString("vi-VN");
+  // v5.4: dashboard dùng cache — tránh tải lại DB mỗi lần render bảng
+  if (state.dash && state.dash.rows) renderDashboard(computeDash(state.dash.rows));
 }
 
 function renderHead() {
@@ -2022,6 +2136,7 @@ function bindEvents() {
   $("btnExportCsv").addEventListener("click", exportCSV);
   $("btnExportJson").addEventListener("click", exportJSON);
   $("btnExportReport").addEventListener("click", openReportModal); // v5.0: báo cáo sản lượng
+  $("btnDashRefresh").addEventListener("click", refreshDashboard); // v5.4
   $("btnClear").addEventListener("click", clearAll);
 
   $("btnMasterAdd").addEventListener("click", () => masterForm("", ""));
