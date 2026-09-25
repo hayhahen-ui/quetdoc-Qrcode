@@ -182,15 +182,21 @@
     </div>
   </section>
 
-  <!-- ============ DANH MỤC CHỈ THỊ (ADMIN) ============ -->
-  <section class="card pad hidden" id="dirPanel" style="margin-top:12px">
-    <h2 class="sec-title">🏷 Danh mục Chỉ thị <span class="muted" style="font-weight:400">(chỉ quản trị viên)</span></h2>
-    <p class="sec-hint">Khi quét tem thùng, app tự tách <b>Chỉ thị</b> từ số thùng (9 ký tự đầu) và tra <b>PO cố định</b> từ danh mục này. <b>Size mỗi thùng mỗi khác</b> — chọn ở khung quét phía trên (giữ nguyên cho các mã tiếp theo).</p>
-    <div class="toolbar"><button class="small" id="btnDirAdd">＋ Thêm chỉ thị</button></div>
-    <div style="overflow-x:auto;margin-top:8px">
+  <!-- ============ MASTER DATA ĐƠN HÀNG (ADMIN) ============ -->
+  <section class="card pad hidden" id="masterPanel" style="margin-top:12px">
+    <h2 class="sec-title">📦 Master data đơn hàng <span class="muted" style="font-weight:400">(chỉ quản trị viên)</span></h2>
+    <p class="sec-hint">File <b>ĐƠN ĐẶT HÀNG TVS</b> chuẩn: 1 đơn hàng (chỉ thị) = 1 PO cố định. Khi quét, app tự tra PO từ đây. Import lại file khi đơn hàng thay đổi; bấm <b>Sửa</b> để chỉnh từng dòng.</p>
+    <div class="toolbar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="small" id="btnMasterImport">📥 Import CSV</button>
+      <button class="small" id="btnMasterAdd">＋ Thêm dòng</button>
+      <input type="text" id="masterSearch" placeholder="Tìm đơn hàng / PO…" style="flex:1;min-width:140px">
+      <input type="file" id="masterFile" accept=".csv" class="hidden">
+    </div>
+    <p class="muted" id="masterCount" style="font-size:12px;margin:8px 0 0"></p>
+    <div style="overflow-x:auto;margin-top:8px;max-height:320px;overflow-y:auto">
       <table>
-        <thead><tr><th>Chỉ thị</th><th>PO</th><th></th></tr></thead>
-        <tbody id="dirBody"></tbody>
+        <thead><tr><th>Đơn hàng</th><th>PO</th><th>Màu</th><th>Size</th><th>Đôi</th><th>Thùng</th><th></th></tr></thead>
+        <tbody id="masterBody"></tbody>
       </table>
     </div>
   </section>
@@ -232,6 +238,6 @@
 </div>
 
 <div id="toasts"></div>
-<script src="assets/js/app.js?v=4.4" defer></script>
+<script src="assets/js/app.js?v=4.5" defer></script>
 </body>
 </html>

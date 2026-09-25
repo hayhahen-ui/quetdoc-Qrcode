@@ -52,7 +52,10 @@ const state = {
   page: 0,
   filterText: "",
   filterDate: "",
-  directives: {},       // danh mục Chỉ thị: { "AE2608210": {po} } (PO cố định; size mỗi thùng mỗi khác -> chọn ở pad quét)
+  directives: {},       // (giữ tương thích) thay bằng master bên dưới
+  master: {},           // master data đơn hàng: { "AE2608622": {po, rows:[...]} }
+  masterRows: [],       // mảng dòng master_orders cho bảng admin
+  masterReady: false,   // true khi đã tải master thành công
 };
 
 let html5Qr = null;
@@ -189,6 +192,7 @@ function doLogout() {
   state.me = null;
   state.records = [];
   state.directives = {};
+  state.master = {}; state.masterRows = []; state.masterReady = false;
   $("viewApp").classList.add("hidden");
   $("viewLogin").classList.remove("hidden");
   $("loginUser").value = "";
@@ -204,7 +208,7 @@ async function enterApp() {
   rc.className = "role " + state.me.role;
   const admin = isAdmin();
   $("adminPanel").classList.toggle("hidden", !admin);
-  $("dirPanel").classList.toggle("hidden", !admin);
+  $("masterPanel").classList.toggle("hidden", !admin);
   $("btnClear").innerHTML = admin ? "🗑 Xóa tất cả" : "🗑 Xóa bản ghi của tôi";
   $("dataHint").textContent = admin
     ? "Bạn đang xem toàn bộ bản ghi của mọi tài khoản — đồng bộ trực tiếp. Bấm vào ô PO / Size để sửa."
@@ -213,7 +217,7 @@ async function enterApp() {
   renderHead();
   try {
     await loadRecords();
-    await loadDirectives();
+    await loadMaster();
     if (admin) await loadAccounts();
   } catch (e) {
     toast("Không tải được dữ liệu: " + (e.message || e), "err");
@@ -370,11 +374,15 @@ async function addRecord(content, format) {
   const dupLocal = state.records.find((r) => norm(r.content) === norm(content));
   if (dupLocal) { showDupBox(dupLocal, content); return; }
 
-  // Tem thùng giày: tự tách chỉ thị từ số thùng, tra PO cố định từ danh mục.
-  // Size mỗi thùng mỗi khác -> lấy từ pad chọn size (dính cho các mã tiếp theo),
-  // KHÔNG dùng size mặc định theo chỉ thị nữa.
+  // Tem thùng giày: tự tách chỉ thị từ số thùng, tra PO cố định từ master data
+  // (file ĐƠN ĐẶT HÀNG TVS chuẩn). Size mỗi thùng mỗi khác -> lấy từ pad chọn
+  // size (dính cho các mã tiếp theo).
   const chiThi = parseChiThi(content);
-  const dir = chiThi ? state.directives[chiThi] : null;
+  const po = masterPO(chiThi);
+  if (chiThi && !po && state.masterReady && !masterWarned.has(chiThi)) {
+    masterWarned.add(chiThi);
+    toast("Chỉ thị " + chiThi + " chưa có trong master data — PO để trống. Admin bổ sung đơn hàng.", "warn");
+  }
 
   // Ghi nhận TỨC THÌ (optimistic): hiện lên bảng + kêu beep ngay,
   // đồng bộ lên server ở nền để không chặn lần quét tiếp theo.
@@ -384,7 +392,7 @@ async function addRecord(content, format) {
     scannedAt: new Date().toISOString(),
     session: state.settings.session.trim(), note: state.settings.note.trim(),
     userId: state.me.id, username: state.me.username,
-    chiThi, po: dir ? dir.po : "", size: currentSizeStr(),
+    chiThi, po, size: currentSizeStr(),
     pending: true,
   };
   state.records.unshift(rec);
@@ -653,85 +661,208 @@ async function loadAccounts() {
   }
 }
 
-/* ---------------- danh mục chỉ thị (tem thùng giày, admin quản lý) ---------------- */
-let warnedNoDirectives = false;
-async function loadDirectives() {
-  state.directives = {};
+/* ---------------- master data đơn hàng (file ĐƠN ĐẶT HÀNG TVS chuẩn) ----------------
+ * 1 dòng = 1 (đơn hàng/chỉ thị, size). PO cố định theo đơn hàng.
+ * Khi quét: tự tách chỉ thị từ số thùng -> tra PO từ master này. */
+let warnedNoMaster = false;
+const masterWarned = new Set(); // chỉ thị lạ đã cảnh báo trong phiên (tránh spam)
+async function loadMaster() {
+  state.master = {}; state.masterRows = []; state.masterReady = false;
   if (!supa) return;
   try {
-    const { data, error } = await supa.from("directives").select("chi_thi,po").order("chi_thi");
+    const { data, error } = await supa.from("master_orders")
+      .select("don_hang,size,po,mau,so_doi,so_thung,quoc_gia,ngay_xuat_kd,dot_dat_hang")
+      .order("don_hang").order("size");
     if (error) throw error;
-    (data || []).forEach((d) => { state.directives[d.chi_thi] = { po: d.po || "" }; });
+    state.masterRows = data || [];
+    (data || []).forEach((d) => {
+      const m = state.master[d.don_hang] || (state.master[d.don_hang] = { po: "", rows: [] });
+      if (!m.po && d.po) m.po = d.po;
+      m.rows.push(d);
+    });
+    state.masterReady = true;
   } catch (e) {
-    console.warn("Không tải được danh mục chỉ thị:", e.message);
-    // Bảng chưa tồn tại = chưa chạy migration v4.0 -> nhắc admin 1 lần/phiên
-    if (isAdmin() && !warnedNoDirectives && /directives|schema cache|does not exist/i.test(e.message || "")) {
-      warnedNoDirectives = true;
-      toast("Chưa có bảng Danh mục Chỉ thị. Hãy chạy đoạn migration v4.0 trong Supabase SQL Editor.", "warn");
+    console.warn("Không tải được master data:", e.message);
+    // Bảng chưa tồn tại = chưa chạy migration v4.5 -> nhắc admin 1 lần/phiên
+    if (isAdmin() && !warnedNoMaster && /master_orders|schema cache|does not exist/i.test(e.message || "")) {
+      warnedNoMaster = true;
+      toast("Chưa có bảng Master data. Hãy chạy file docs/migration-v4.5.sql trong Supabase SQL Editor.", "warn");
     }
   }
-  if (isAdmin()) renderDirectives();
+  if (isAdmin()) renderMaster();
 }
-function renderDirectives() {
-  const body = $("dirBody");
+function masterPO(chiThi) {
+  const m = chiThi && state.master[chiThi];
+  return m ? m.po || "" : "";
+}
+function renderMaster() {
+  const body = $("masterBody");
   if (!body) return;
-  const keys = Object.keys(state.directives).sort();
-  if (!keys.length) {
-    body.innerHTML = "<tr><td colspan='3' class='muted'>Chưa có chỉ thị nào. Bấm “＋ Thêm chỉ thị”.</td></tr>";
+  const q = (($("masterSearch") && $("masterSearch").value) || "").trim().toLowerCase();
+  const rows = state.masterRows.filter((d) =>
+    !q || (d.don_hang || "").toLowerCase().includes(q) || (d.po || "").toLowerCase().includes(q));
+  const orders = new Set(state.masterRows.map((d) => d.don_hang)).size;
+  $("masterCount").textContent = state.masterRows.length + " dòng · " + orders + " đơn hàng" +
+    (q ? " · khớp lọc: " + rows.length : "");
+  if (!rows.length) {
+    body.innerHTML = "<tr><td colspan='7' class='muted'>" +
+      (state.masterRows.length ? "Không khớp tìm kiếm." : "Chưa có dữ liệu. Bấm “📥 Import CSV”.") + "</td></tr>";
     return;
   }
-  body.innerHTML = keys.map((k) => {
-    const d = state.directives[k];
-    return "<tr><td><b>" + esc(k) + "</b></td><td>" + esc(d.po || "—") + "</td>" +
-      "<td style='white-space:nowrap'><button class='small' data-diredit='" + esc(k) + "'>Sửa</button> " +
-      "<button class='small danger' data-dirdel='" + esc(k) + "'>Xóa</button></td></tr>";
-  }).join("");
-  body.querySelectorAll("[data-diredit]").forEach((b) =>
-    b.addEventListener("click", () => dirForm(b.getAttribute("data-diredit"))));
-  body.querySelectorAll("[data-dirdel]").forEach((b) =>
-    b.addEventListener("click", () => dirDelete(b.getAttribute("data-dirdel"))));
+  const show = rows.slice(0, 100);
+  body.innerHTML = show.map((d) => {
+    const key = d.don_hang + "|" + d.size;
+    return "<tr><td><b>" + esc(d.don_hang) + "</b></td><td>" + esc(d.po || "—") + "</td>" +
+      "<td>" + esc(d.mau || "—") + "</td><td>" + esc(d.size || "—") + "</td>" +
+      "<td>" + (d.so_doi ?? "—") + "</td><td>" + (d.so_thung ?? "—") + "</td>" +
+      "<td style='white-space:nowrap'><button class='small' data-medit='" + esc(key) + "'>Sửa</button> " +
+      "<button class='small danger' data-mdel='" + esc(key) + "'>Xóa</button></td></tr>";
+  }).join("") + (rows.length > 100
+    ? "<tr><td colspan='7' class='muted'>…còn " + (rows.length - 100) + " dòng, hãy tìm kiếm để thu hẹp.</td></tr>" : "");
+  body.querySelectorAll("[data-medit]").forEach((b) =>
+    b.addEventListener("click", () => { const k = b.getAttribute("data-medit").split("|"); masterForm(k[0], k[1]); }));
+  body.querySelectorAll("[data-mdel]").forEach((b) =>
+    b.addEventListener("click", () => { const k = b.getAttribute("data-mdel").split("|"); masterDelete(k[0], k[1]); }));
 }
-function dirForm(chiThi) {
-  const d = (chiThi && state.directives[chiThi]) || { po: "" };
-  openModal(chiThi ? "Sửa chỉ thị " + chiThi : "Thêm chỉ thị",
-    "<div class='field'><label>Chỉ thị (2 chữ + 7 số)</label>" +
-    "<input id='mChiThi' value='" + esc(chiThi || "") + "'" + (chiThi ? " disabled" : "") +
-    " placeholder='VD: AE2608210' style='text-transform:uppercase'></div>" +
-    "<div class='field'><label>PO (cố định theo chỉ thị)</label><input id='mPo' value='" + esc(d.po) + "' placeholder='VD: 0903174893-1'></div>" +
-    "<p class='muted' style='font-size:12px'>Size mỗi thùng mỗi khác nên công nhân chọn ở khung quét, không nhập ở đây.</p>",
+/* Thêm / sửa 1 dòng master (đơn hàng + size là khóa) */
+function masterForm(donHang, size) {
+  const isNew = !donHang;
+  const d = (!isNew && (state.masterRows.find((r) => r.don_hang === donHang && r.size === size))) || {};
+  openModal(isNew ? "Thêm dòng master" : "Sửa " + donHang + " / " + size,
+    "<div class='field'><label>Đơn hàng (chỉ thị)</label>" +
+    "<input id='mDonHang' value='" + esc(donHang || "") + "'" + (isNew ? "" : " disabled") +
+    " placeholder='VD: AE2608622' style='text-transform:uppercase'></div>" +
+    "<div class='field'><label>Size</label>" +
+    "<input id='mSize2' value='" + esc(size || "") + "'" + (isNew ? "" : " disabled") +
+    " placeholder='VD: UK 5'></div>" +
+    "<div class='field'><label>PO</label><input id='mPo2' value='" + esc(d.po || "") + "' placeholder='VD: 0903165517-1'></div>" +
+    "<div class='field'><label>Màu</label><input id='mMau' value='" + esc(d.mau || "") + "' placeholder='VD: LC1785'></div>" +
+    "<div class='rowflex'><div class='field inline'><label>Số đôi</label><input id='mSoDoi' type='number' value='" + (d.so_doi ?? "") + "'></div>" +
+    "<div class='field inline'><label>Số thùng</label><input id='mSoThung' type='number' value='" + (d.so_thung ?? "") + "'></div></div>" +
+    "<div class='field'><label>Quốc gia</label><input id='mQg' value='" + esc(d.quoc_gia || "") + "'></div>" +
+    "<div class='rowflex'><div class='field inline'><label>Ngày xuất KD</label><input id='mNgay' value='" + esc(d.ngay_xuat_kd || "") + "'></div>" +
+    "<div class='field inline'><label>Đợt đặt hàng</label><input id='mDot' value='" + esc(d.dot_dat_hang || "") + "'></div></div>",
     "Lưu", async () => {
-      const k = (chiThi || $("mChiThi").value).trim().toUpperCase();
-      const po = $("mPo").value.trim();
-      if (!/^[A-Z]{2}\d{7}$/.test(k)) { toast("Chỉ thị phải đúng dạng 2 chữ + 7 số (VD: AE2608210).", "warn"); return; }
-      const { error } = await supa.from("directives").upsert(
-        { chi_thi: k, po, updated_at: new Date().toISOString(), updated_by: state.me.username },
-        { onConflict: "chi_thi" });
+      const k = (donHang || $("mDonHang").value).trim().toUpperCase();
+      const s = (size || $("mSize2").value).trim().toUpperCase();
+      if (!k || !s) { toast("Thiếu Đơn hàng hoặc Size.", "warn"); return; }
+      const row = {
+        don_hang: k, size: s,
+        po: $("mPo2").value.trim(), mau: $("mMau").value.trim().toUpperCase(),
+        so_doi: parseInt($("mSoDoi").value, 10) || 0, so_thung: parseInt($("mSoThung").value, 10) || 0,
+        quoc_gia: $("mQg").value.trim().toUpperCase(), ngay_xuat_kd: $("mNgay").value.trim(),
+        dot_dat_hang: $("mDot").value.trim(), updated_at: new Date().toISOString(),
+      };
+      const { error } = await supa.from("master_orders").upsert(row, { onConflict: "don_hang,size" });
       closeModal();
-      if (error) { toast("Lỗi lưu danh mục: " + error.message, "err"); return; }
-      await loadDirectives();
-      // Kaizen: tự điền PO cho các bản ghi cũ cùng chỉ thị mà đang trống PO,
-      // để bảng và file xuất có PO ngay sau khi admin bổ sung danh mục.
-      if (schemaV4 && po) {
-        try {
-          await supa.from("records").update({ po }).eq("chi_thi", k).eq("po", "");
-          await supa.from("records").update({ po }).eq("chi_thi", k).is("po", null);
-          await loadRecords();
-        } catch (e) { /* thiếu quyền/cột -> bỏ qua, không chặn */ }
-      }
-      toast("Đã lưu chỉ thị " + k + ".", "ok");
+      if (error) { toast("Lỗi lưu master: " + error.message, "err"); return; }
+      await loadMaster();
+      await backfillPoFromMaster();
+      toast("Đã lưu " + k + " / " + s + ".", "ok");
     });
 }
-function dirDelete(chiThi) {
-  openModal("Xóa chỉ thị",
-    "<p>Xóa <b>" + esc(chiThi) + "</b> khỏi danh mục? Các bản ghi đã quét giữ nguyên.</p>",
+function masterDelete(donHang, size) {
+  openModal("Xóa dòng master",
+    "<p>Xóa <b>" + esc(donHang) + " / " + esc(size) + "</b> khỏi master data? Các bản ghi đã quét giữ nguyên.</p>",
     "Xóa", async () => {
-      const { error } = await supa.from("directives").delete().eq("chi_thi", chiThi);
+      const { error } = await supa.from("master_orders").delete().eq("don_hang", donHang).eq("size", size);
       closeModal();
       if (error) { toast("Lỗi xóa: " + error.message, "err"); return; }
-      await loadDirectives();
-      toast("Đã xóa chỉ thị " + chiThi + ".", "ok");
+      await loadMaster();
+      toast("Đã xóa.", "ok");
     });
 }
+/* Đọc CSV đơn hàng: chịu BOM, CRLF, cột có ngoặc kép; map cột theo tên tiếng Việt */
+function parseOrderCSV(text) {
+  text = text.replace(/^\uFEFF/, "");
+  const rows = [];
+  let cur = [""], inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i + 1] === '"') { cur[cur.length - 1] += '"'; i++; } else inQ = false; }
+      else cur[cur.length - 1] += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ",") cur.push("");
+    else if (c === "\n") { rows.push(cur); cur = [""]; }
+    else if (c === "\r") { /* bỏ qua, \n sẽ tách dòng */ }
+    else cur[cur.length - 1] += c;
+  }
+  if (cur.length > 1 || cur[0] !== "") rows.push(cur);
+  if (!rows.length) return { rows: [] };
+  const norm = (s) => (s || "").trim().toLowerCase();
+  const header = rows[0].map(norm);
+  const alias = {
+    don_hang: ["đơn hàng", "don hang", "mã lệnh", "ma lenh", "chỉ thị", "chi thi", "order"],
+    po: ["po"],
+    mau: ["màu", "mau", "color"],
+    size: ["size"],
+    so_doi: ["số đôi", "so doi", "số lượng đôi"],
+    so_thung: ["số thùng", "so thung", "số lượng thùng"],
+    quoc_gia: ["quốc gia", "quoc gia", "nước", "country"],
+    ngay_xuat_kd: ["ngày xuất kd", "ngay xuat kd"],
+    dot_dat_hang: ["đợt đặt hàng", "dot dat hang"],
+  };
+  const col = {};
+  Object.keys(alias).forEach((k) => { col[k] = header.findIndex((h) => alias[k].indexOf(h) >= 0); });
+  if (col.don_hang < 0 || col.size < 0) return { rows: [], error: "Thiếu cột Đơn hàng hoặc Size." };
+  const out = [];
+  for (const r of rows.slice(1)) {
+    const dh = (r[col.don_hang] || "").trim().toUpperCase();
+    const sz = (r[col.size] || "").trim().toUpperCase();
+    if (!dh || !sz) continue;
+    const num = (k) => {
+      const v = parseInt(((col[k] >= 0 && r[col[k]]) || "").replace(/[^\d-]/g, ""), 10);
+      return isNaN(v) ? 0 : v;
+    };
+    const str = (k) => (col[k] >= 0 ? (r[col[k]] || "").trim() : "");
+    out.push({
+      don_hang: dh, size: sz, po: str("po"), mau: str("mau").toUpperCase(),
+      so_doi: num("so_doi"), so_thung: num("so_thung"),
+      quoc_gia: str("quoc_gia").toUpperCase(), ngay_xuat_kd: str("ngay_xuat_kd"),
+      dot_dat_hang: str("dot_dat_hang"), updated_at: new Date().toISOString(),
+    });
+  }
+  return { rows: out };
+}
+async function importMasterCSV(file) {
+  if (!file) return;
+  const parsed = parseOrderCSV(await file.text());
+  if (parsed.error) { toast(parsed.error, "err"); return; }
+  if (!parsed.rows.length) { toast("File không có dòng dữ liệu hợp lệ.", "warn"); return; }
+  if (!confirm("Import " + parsed.rows.length + " dòng vào master data? Dòng trùng (đơn hàng + size) sẽ được ghi đè.")) return;
+  toast("Đang import " + parsed.rows.length + " dòng…", "");
+  try {
+    for (let i = 0; i < parsed.rows.length; i += 200) {
+      const { error } = await supa.from("master_orders")
+        .upsert(parsed.rows.slice(i, i + 200), { onConflict: "don_hang,size" });
+      if (error) throw error;
+    }
+    await loadMaster();
+    await backfillPoFromMaster();
+    toast("Import xong " + parsed.rows.length + " dòng master data.", "ok");
+  } catch (e) {
+    toast("Lỗi import: " + (e.message || e), "err");
+  }
+}
+/* Vá PO cho các bản ghi quét đang trống PO mà master đã có (tối đa 200/lần) */
+async function backfillPoFromMaster() {
+  if (!schemaV4 || !supa) return;
+  try {
+    const { data, error } = await supa.from("records").select("id,chi_thi").eq("po", "").limit(200);
+    if (error || !data || !data.length) return;
+    const byChi = {};
+    data.forEach((r) => {
+      const po = masterPO(r.chi_thi);
+      if (po) (byChi[r.chi_thi] || (byChi[r.chi_thi] = { po: po, ids: [] })).ids.push(r.id);
+    });
+    for (const k of Object.keys(byChi)) {
+      await supa.from("records").update({ po: byChi[k].po }).in("id", byChi[k].ids);
+    }
+    if (Object.keys(byChi).length) { try { await loadRecords(); } catch (e) {} }
+  } catch (e) { /* không chặn */ }
+}
+
 
 /* Xóa TOÀN BỘ bản ghi quét của mọi tài khoản (chỉ admin).
  * Yêu cầu gõ đúng cụm xác nhận để tránh bấm nhầm. */
@@ -1078,7 +1209,10 @@ function bindEvents() {
   $("btnExportJson").addEventListener("click", exportJSON);
   $("btnClear").addEventListener("click", clearAll);
 
-  $("btnDirAdd").addEventListener("click", () => dirForm(""));
+  $("btnMasterAdd").addEventListener("click", () => masterForm("", ""));
+  $("btnMasterImport").addEventListener("click", () => $("masterFile").click());
+  $("masterFile").addEventListener("change", (e) => { importMasterCSV(e.target.files[0]); e.target.value = ""; });
+  $("masterSearch").addEventListener("input", renderMaster);
 
   $("btnWipeAll").addEventListener("click", adminWipeAll);
 
