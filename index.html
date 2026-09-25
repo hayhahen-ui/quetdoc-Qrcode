@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0A0D14">
 <meta name="description" content="QuetDoc QRcode — Quét mã QR/barcode bằng camera và ghi nhận dữ liệu, phân quyền quản trị / nhân viên.">
 <title>QuetDoc QRcode · Quét mã & ghi nhận dữ liệu</title>
-<link rel="stylesheet" href="assets/css/styles.css?v=4.8">
+<link rel="stylesheet" href="assets/css/styles.css?v=5.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" async></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" async></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" async></script>
@@ -115,7 +115,7 @@
       </div>
 
       <div class="sizeblock" style="margin-top:12px">
-        <label class="seclabel">Size thùng (UK) — chạm chọn 1 lần, giữ nguyên cho các mã quét tiếp theo</label>
+        <label class="seclabel">Size thùng (UK) — <b>đã có packing list thì app tự điền</b> <span title="Tự tra từ packing list">📦</span>; chỉ chạm chọn khi tem không có trong packing</label>
         <div class="sizepad" id="sizePad"></div>
         <div class="pairsrow">
           <span>Số đôi / thùng:</span>
@@ -128,7 +128,7 @@
 
       <div class="btnrow" style="margin-top:12px">
         <label class="check"><input type="checkbox" id="chkSound" checked> Âm báo khi quét</label>
-        <label class="check"><input type="checkbox" id="chkOcr" checked> 🤖 Tự đọc size từ tem</label>
+        <label class="check"><input type="checkbox" id="chkOcr" checked> 🤖 Tự đọc size từ tem <span class="muted">(dự phòng khi không có packing)</span></label>
         <span class="muted" id="ocrStatus"></span>
       </div>
 
@@ -148,6 +148,7 @@
         <button class="small" id="btnExportXlsx">⬇ Xuất Excel</button>
         <button class="small" id="btnExportCsv">⬇ Xuất CSV</button>
         <button class="small" id="btnExportJson">⬇ Xuất JSON</button>
+        <button class="small" id="btnExportReport">📊 Báo cáo sản lượng</button>
         <span class="spacer"></span>
         <button class="small danger" id="btnClear">🗑 Xóa tất cả</button>
       </div>
@@ -203,6 +204,25 @@
     </div>
   </section>
 
+  <!-- ============ PACKING LIST (ADMIN) ============ -->
+  <section class="card pad hidden" id="packingPanel" style="margin-top:12px">
+    <h2 class="sec-title">📦 Packing list <span class="muted" style="font-weight:400">(chỉ quản trị viên)</span></h2>
+    <p class="sec-hint">File <b>PACKING_LIST_CLP_TVS</b> chuẩn: mỗi chỉ thị có các khoảng thùng liên tục, mỗi khoảng cố định 1 size + số đôi/thùng. Khi quét, app tự tra <b>số thứ tự thùng</b> (đuôi mã QR) vào khoảng này để điền <b>Size/PO chính xác 100%</b> — không cần OCR hay chọn tay.</p>
+    <div class="toolbar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="small" id="btnPackingImport">📥 Import Excel</button>
+      <button class="small" id="btnPackingAdd">＋ Thêm khoảng</button>
+      <input type="text" id="packingSearch" placeholder="Tìm chỉ thị / PO…" style="flex:1;min-width:140px">
+      <input type="file" id="packingFile" accept=".xlsx" class="hidden">
+    </div>
+    <p class="muted" id="packingCount" style="font-size:12px;margin:8px 0 0"></p>
+    <div style="overflow-x:auto;margin-top:8px;max-height:320px;overflow-y:auto">
+      <table>
+        <thead><tr><th>Chỉ thị</th><th>Size</th><th>Đôi/thùng</th><th>Số thùng</th><th>Từ</th><th>Đến</th><th>PO</th><th>Art#</th><th></th></tr></thead>
+        <tbody id="packingBody"></tbody>
+      </table>
+    </div>
+  </section>
+
   <!-- ============ TÀI KHOẢN CỦA TÔI ============ -->
   <section class="card pad" style="margin-top:12px">
     <h2 class="sec-title">👤 Tài khoản của tôi</h2>
@@ -221,7 +241,7 @@
   </section>
 
   <footer>
-    QuetDoc QRcode · <b>v4.8</b> · chạy 100% trên trình duyệt, dữ liệu không gửi đi đâu.<br>
+    QuetDoc QRcode · <b>v5.0</b> · đồng bộ Supabase (đa thiết bị).<br>
     💡 Mẹo: mở trang bằng <b>HTTPS</b> thì trình duyệt mới cho phép dùng camera.
   </footer>
 </div>
@@ -240,6 +260,6 @@
 </div>
 
 <div id="toasts"></div>
-<script src="assets/js/app.js?v=4.8" defer></script>
+<script src="assets/js/app.js?v=5.0" defer></script>
 </body>
 </html>

@@ -63,6 +63,8 @@ Quét mã **QR / barcode** bằng camera và **ghi nhận dữ liệu** (nội d
 - 🔍 Tìm kiếm, lọc theo ngày, phân trang
 - ⬇ Xuất **CSV** (mở ngon bằng Excel, có dấu tiếng Việt) và **JSON**
 - 📊 Thống kê: tổng lượt quét / hôm nay / mã duy nhất / lượt bỏ qua trùng
+- 📦 **Packing list (v5.0)**: import file `PACKING_LIST_CLP_TVS.xlsx` (112 chỉ thị, 1068 khoảng thùng) → khi quét, app **tự tra số thứ tự thùng** (đuôi mã QR) để điền **Size/số đôi và PO chính xác**, không cần chọn tay hay OCR. Báo cáo **sản lượng theo mẫu**: P = thùng đã quét trong khoảng, Q = P × số đôi/thùng, dedupe mã trùng, tô đỏ khoảng còn thiếu / xanh khoảng đủ.
+  - Chạy `docs/migration-v5.0.sql` trong Supabase SQL Editor **trước khi dùng** (tạo bảng `packing_ranges` + seed 1068 dòng).
 
 ## Chạy local
 

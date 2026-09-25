@@ -56,6 +56,9 @@ const state = {
   master: {},           // master data đơn hàng: { "AE2608622": {po, rows:[...]} }
   masterRows: [],       // mảng dòng master_orders cho bảng admin
   masterReady: false,   // true khi đã tải master thành công
+  packing: [],          // v5.0: mảng khoảng packing_ranges
+  packingByChi: new Map(), // v5.0: chi_thi -> [ranges] (tra cứu O(1) khi quét)
+  packingReady: false,  // true khi đã tải packing thành công
 };
 
 let html5Qr = null;
@@ -193,6 +196,7 @@ function doLogout() {
   state.records = [];
   state.directives = {};
   state.master = {}; state.masterRows = []; state.masterReady = false;
+  state.packing = []; state.packingByChi = new Map(); state.packingReady = false;
   $("viewApp").classList.add("hidden");
   $("viewLogin").classList.remove("hidden");
   $("loginUser").value = "";
@@ -209,6 +213,7 @@ async function enterApp() {
   const admin = isAdmin();
   $("adminPanel").classList.toggle("hidden", !admin);
   $("masterPanel").classList.toggle("hidden", !admin);
+  $("packingPanel").classList.toggle("hidden", !admin);
   $("btnClear").innerHTML = admin ? "🗑 Xóa tất cả" : "🗑 Xóa bản ghi của tôi";
   $("dataHint").textContent = admin
     ? "Bạn đang xem toàn bộ bản ghi của mọi tài khoản — đồng bộ trực tiếp. Bấm vào ô PO / Size để sửa."
@@ -218,6 +223,7 @@ async function enterApp() {
   try {
     await loadRecords();
     await loadMaster();
+    await loadPacking(); // v5.0: khoảng thùng -> size (tra cứu khi quét)
     if (admin) await loadAccounts();
   } catch (e) {
     toast("Không tải được dữ liệu: " + (e.message || e), "err");
@@ -484,11 +490,14 @@ async function addRecord(content, format) {
   const dupLocal = state.records.find((r) => norm(r.content) === norm(content));
   if (dupLocal) { showDupBox(dupLocal, content); return; }
 
-  // Tem thùng giày: tự tách chỉ thị từ số thùng, tra PO cố định từ master data
-  // (file ĐƠN ĐẶT HÀNG TVS chuẩn). Size mỗi thùng mỗi khác -> lấy từ pad chọn
-  // size (dính cho các mã tiếp theo).
+  // Tem thùng giày: tự tách chỉ thị từ số thùng.
+  // v5.0: tra packing list (khoảng thùng -> size/số đôi/PO) — nguồn chuẩn,
+  // đã kiểm chứng trên dữ liệu thật (AE2608506: P=91, Q=546).
+  // Không có packing -> PO từ master, size từ pad chọn (cũ).
   const chiThi = parseChiThi(content);
-  const po = masterPO(chiThi);
+  const pack = packingLookup(chiThi, content);
+  const po = (pack && pack.po) || masterPO(chiThi);
+  const packSize = packSizeStr(pack);
   if (chiThi && !po && state.masterReady && !masterWarned.has(chiThi)) {
     masterWarned.add(chiThi);
     toast("Chỉ thị " + chiThi + " chưa có trong master data — PO để trống. Admin bổ sung đơn hàng.", "warn");
@@ -502,7 +511,7 @@ async function addRecord(content, format) {
     scannedAt: new Date().toISOString(),
     session: state.settings.session.trim(), note: state.settings.note.trim(),
     userId: state.me.id, username: state.me.username,
-    chiThi, po, size: currentSizeStr(),
+    chiThi, po, size: packSize || currentSizeStr(),
     pending: true,
   };
   state.records.unshift(rec);
@@ -556,7 +565,8 @@ function showOkBox(rec, silent) {
   box.innerHTML = "✅ <b>Đã ghi nhận:</b><br>" +
     "<code>" + esc(rec.content) + "</code><br><span class='muted'>" + esc(rec.format) + " · " + fmtTime(rec.scannedAt) + "</span>" +
     (rec.chiThi ? "<br><span class='muted'>Chỉ thị <b>" + esc(rec.chiThi) + "</b>" +
-      (rec.po ? " · PO " + esc(rec.po) : "") + (rec.size ? " · Size " + esc(rec.size) : "") + "</span> " : "") +
+      (rec.po ? " · PO " + esc(rec.po) : "") +
+      (rec.size ? " · Size " + esc(rec.size) + (isPackSize(rec) ? " 📦" : "") : "") + "</span> " : "") +
     stripHTML(rec);
   box.classList.add("show");
   bindStrip(box);
@@ -693,6 +703,7 @@ function renderAll() {
   renderStats(); renderTable();
   const n = visibleRecords().length;
   $("btnExportXlsx").disabled = $("btnExportCsv").disabled = $("btnExportJson").disabled = $("btnClear").disabled = !n;
+  $("btnExportReport").disabled = !state.packingReady || !state.packing.length; // v5.0: cần packing list
 }
 
 function renderStats() {
@@ -729,7 +740,7 @@ function renderTable() {
         "<td class='muted'>" + n + "</td>" +
         "<td><b>" + esc(r.chiThi || "—") + "</b></td>" +
         "<td class='editable' data-edit='po' data-id='" + r.id + "' title='Bấm để sửa PO'>" + esc(r.po || "—") + "</td>" +
-        "<td class='editable' data-edit='size' data-id='" + r.id + "' title='Bấm để sửa Size'>" + esc(r.size || "—") + (r.ocrSize && r.size ? " <span title='Tự đọc từ tem (OCR)'>🤖</span>" : "") + "</td>" +
+        "<td class='editable' data-edit='size' data-id='" + r.id + "' title='Bấm để sửa Size'>" + esc(r.size || "—") + (r.ocrSize && r.size ? " <span title='Tự đọc từ tem (OCR)'>🤖</span>" : "") + (isPackSize(r) ? " <span title='Tự tra từ packing list'>📦</span>" : "") + "</td>" +
         "<td class='content'><code style='font-size:12px'>" + esc(r.content) + "</code>" +
           (r.note ? "<br><span class='muted'>" + esc(r.note) + "</span>" : "") + "</td>" +
         "<td class='muted' style='white-space:nowrap'>" + fmtTime(r.scannedAt) + "</td>" +
@@ -1010,6 +1021,396 @@ async function backfillPoFromMaster() {
 }
 
 
+/* ---------------- v5.0: packing list (khoảng thùng -> size/số đôi) ----------------
+ * File PACKING_LIST_CLP_TVS chuẩn: mỗi chỉ thị có các khoảng thùng liên tục
+ * [thung_tu, thung_den], mỗi khoảng cố định 1 size + số đôi/thùng + PO.
+ * Số thứ tự thùng = phần số sau ký tự "6" ở đuôi mã QR
+ * (VD "AE260850660003" -> 3; "AD260000861537" -> 1537).
+ * ĐÃ KIỂM CHỨNG khớp hệ tính toán cũ trên dữ liệu thật:
+ * AE2608506 -> P=91 thùng, Q=546 đôi (92 mã duy nhất, 1 mã ngoài khoảng).
+ * Khi quét: size/PO tự điền CHÍNH XÁC từ packing — không cần OCR/pad. */
+let warnedNoPacking = false;
+const PACK_CACHE_KEY = "quetdoc_packing_v1";
+
+async function loadPacking() {
+  state.packing = []; state.packingByChi = new Map(); state.packingReady = false;
+  if (!supa) return;
+  try {
+    const { data, error } = await supa.from("packing_ranges")
+      .select("chi_thi,size,doi_thung,so_thung,tong_doi,thung_tu,thung_den,po,art")
+      .order("chi_thi").order("thung_tu");
+    if (error) throw error;
+    setPacking(data || []);
+    safeLS.set(PACK_CACHE_KEY, JSON.stringify({ at: Date.now(), rows: data || [] }));
+  } catch (e) {
+    console.warn("Không tải được packing list:", e.message);
+    try { // rớt mạng -> dùng cache cũ để vẫn tra được khi quét
+      const raw = safeLS.get(PACK_CACHE_KEY);
+      if (raw) { const c = JSON.parse(raw); if (c.rows && c.rows.length) setPacking(c.rows); }
+    } catch (_) {}
+    if (isAdmin() && !warnedNoPacking && !state.packing.length &&
+        /packing_ranges|schema cache|does not exist/i.test(e.message || "")) {
+      warnedNoPacking = true;
+      toast("Chưa có bảng Packing list. Hãy chạy file docs/migration-v5.0.sql trong Supabase SQL Editor.", "warn");
+    }
+  }
+  if (isAdmin()) renderPacking();
+}
+function setPacking(rows) {
+  state.packing = rows;
+  const m = new Map();
+  rows.forEach((r) => {
+    if (!m.has(r.chi_thi)) m.set(r.chi_thi, []);
+    m.get(r.chi_thi).push(r);
+  });
+  state.packingByChi = m;
+  state.packingReady = true;
+}
+/* Số thứ tự thùng từ mã QR: đuôi dạng "6" + số (VD "60012" -> 12).
+ * Mã "…60000" (= thùng số 0, tem test) hoặc đuôi lạ -> null = ngoài packing. */
+function boxSeq(content, chiThi) {
+  const tail = String(content || "").slice(String(chiThi || "").length);
+  const m = /^6(\d+)$/.exec(tail);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) && n >= 1 ? n : null;
+}
+/* Tra khoảng packing chứa thùng vừa quét -> {size, doi_thung, po, ...} | null */
+function packingLookup(chiThi, content) {
+  if (!chiThi || !state.packingReady) return null;
+  const n = boxSeq(content, chiThi);
+  if (n == null) return null;
+  const arr = state.packingByChi.get(chiThi);
+  if (!arr) return null;
+  for (const r of arr) if (r.thung_tu <= n && n <= r.thung_den) return r;
+  return null;
+}
+/* Size chuẩn "X.0-Y" từ packing (khớp định dạng pad/OCR/strip để badge so sánh được) */
+function packSizeStr(p) {
+  if (!p) return "";
+  const s = parseFloat(p.size);
+  return (isNaN(s) ? String(p.size) : s.toFixed(1)) + "-" + (p.doi_thung == null ? 6 : p.doi_thung);
+}
+/* Bản ghi có size trùng khớp packing không? (để hiện badge 📦; sửa tay -> mất badge) */
+function isPackSize(rec) {
+  if (!rec || !rec.size) return false;
+  const p = packingLookup(rec.chiThi, rec.content);
+  return !!p && packSizeStr(p) === rec.size;
+}
+
+/* ---- admin: quản lý packing list ---- */
+function renderPacking() {
+  const body = $("packingBody");
+  if (!body) return;
+  const q = (($("packingSearch") && $("packingSearch").value) || "").trim().toLowerCase();
+  const rows = state.packing.filter((r) =>
+    !q || (r.chi_thi || "").toLowerCase().includes(q) || (r.po || "").toLowerCase().includes(q));
+  $("packingCount").textContent = state.packing.length + " khoảng · " +
+    state.packingByChi.size + " chỉ thị" + (q ? " · khớp lọc: " + rows.length : "");
+  if (!rows.length) {
+    body.innerHTML = "<tr><td colspan='9' class='muted'>" +
+      (state.packing.length ? "Không khớp tìm kiếm." : "Chưa có dữ liệu. Chạy migration-v5.0.sql hoặc bấm “📥 Import Excel”.") + "</td></tr>";
+    return;
+  }
+  const show = rows.slice(0, 100);
+  body.innerHTML = show.map((r) => {
+    const key = r.chi_thi + "|" + r.thung_tu + "|" + r.thung_den;
+    return "<tr><td><b>" + esc(r.chi_thi) + "</b></td><td>" + esc(r.size) + "</td>" +
+      "<td>" + (r.doi_thung ?? "—") + "</td><td>" + (r.so_thung ?? "—") + "</td>" +
+      "<td>" + r.thung_tu + "</td><td>" + r.thung_den + "</td>" +
+      "<td>" + esc(r.po || "—") + "</td><td>" + esc(r.art || "—") + "</td>" +
+      "<td style='white-space:nowrap'><button class='small' data-pedit='" + esc(key) + "'>Sửa</button> " +
+      "<button class='small danger' data-pdel='" + esc(key) + "'>Xóa</button></td></tr>";
+  }).join("") + (rows.length > 100
+    ? "<tr><td colspan='9' class='muted'>…còn " + (rows.length - 100) + " khoảng, hãy tìm kiếm để thu hẹp.</td></tr>" : "");
+  body.querySelectorAll("[data-pedit]").forEach((b) =>
+    b.addEventListener("click", () => { const k = b.getAttribute("data-pedit").split("|"); packingForm(k[0], k[1], k[2]); }));
+  body.querySelectorAll("[data-pdel]").forEach((b) =>
+    b.addEventListener("click", () => { const k = b.getAttribute("data-pdel").split("|"); packingDelete(k[0], k[1], k[2]); }));
+}
+/* Thêm / sửa 1 khoảng packing (khóa = chỉ thị + thùng từ + thùng đến) */
+function packingForm(chiThi, tu, den) {
+  const isNew = !chiThi;
+  const r = (!isNew && state.packing.find((x) =>
+    x.chi_thi === chiThi && String(x.thung_tu) === String(tu) && String(x.thung_den) === String(den))) || {};
+  const dis = isNew ? "" : " disabled";
+  openModal(isNew ? "Thêm khoảng packing" : "Sửa " + chiThi + " [" + tu + "–" + den + "]",
+    "<div class='rowflex'><div class='field inline'><label>Chỉ thị</label>" +
+    "<input id='pChiThi' value='" + esc(chiThi || "") + "'" + dis + " placeholder='VD: AE2608506' style='text-transform:uppercase'></div>" +
+    "<div class='field inline'><label>Size</label><input id='pSize' value='" + esc(r.size || "") + "' placeholder='VD: 5'></div></div>" +
+    "<div class='rowflex'><div class='field inline'><label>Thùng từ</label>" +
+    "<input id='pTu' type='number' min='1' value='" + (tu || "") + "'" + dis + "></div>" +
+    "<div class='field inline'><label>Thùng đến</label>" +
+    "<input id='pDen' type='number' min='1' value='" + (den || "") + "'" + dis + "></div></div>" +
+    "<div class='rowflex'><div class='field inline'><label>Số đôi/thùng</label>" +
+    "<input id='pDoi' type='number' min='0' value='" + (r.doi_thung ?? 6) + "'></div>" +
+    "<div class='field inline'><label>Số thùng (để trống = tự tính)</label>" +
+    "<input id='pSoThung' type='number' min='0' value='" + (r.so_thung ?? "") + "'></div></div>" +
+    "<div class='rowflex'><div class='field inline'><label>PO</label>" +
+    "<input id='pPo' value='" + esc(r.po || "") + "'></div>" +
+    "<div class='field inline'><label>Art#</label>" +
+    "<input id='pArt' value='" + esc(r.art || "") + "'></div></div>",
+    "Lưu", async () => {
+      const ct = (chiThi || $("pChiThi").value).trim().toUpperCase();
+      const t = parseInt(chiThi ? tu : $("pTu").value, 10);
+      const d = parseInt(chiThi ? den : $("pDen").value, 10);
+      const sz = $("pSize").value.trim();
+      if (!ct || !sz || !(t >= 1) || !(d >= t)) { toast("Kiểm tra lại Chỉ thị / Size / khoảng thùng.", "warn"); return; }
+      const doi = parseInt($("pDoi").value, 10);
+      const stRaw = parseInt($("pSoThung").value, 10);
+      const st = isNaN(stRaw) ? (d - t + 1) : stRaw;
+      const row = {
+        chi_thi: ct, size: sz, doi_thung: isNaN(doi) ? 6 : doi,
+        so_thung: st, tong_doi: st * (isNaN(doi) ? 6 : doi),
+        thung_tu: t, thung_den: d,
+        po: $("pPo").value.trim(), art: $("pArt").value.trim().toUpperCase(),
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = await supa.from("packing_ranges")
+        .upsert(row, { onConflict: "chi_thi,thung_tu,thung_den" });
+      closeModal();
+      if (error) { toast("Lỗi lưu packing: " + error.message, "err"); return; }
+      await loadPacking();
+      toast("Đã lưu khoảng " + ct + " [" + t + "–" + d + "].", "ok");
+    });
+}
+function packingDelete(chiThi, tu, den) {
+  openModal("Xóa khoảng packing",
+    "<p>Xóa khoảng <b>" + esc(chiThi) + " [" + esc(tu) + "–" + esc(den) + "]</b>? Các bản ghi đã quét giữ nguyên.</p>",
+    "Xóa", async () => {
+      const { error } = await supa.from("packing_ranges").delete()
+        .eq("chi_thi", chiThi).eq("thung_tu", tu).eq("thung_den", den);
+      closeModal();
+      if (error) { toast("Lỗi xóa: " + error.message, "err"); return; }
+      await loadPacking();
+      toast("Đã xóa.", "ok");
+    });
+}
+/* Import packing list từ Excel (.xlsx): tự tìm sheet + dòng header
+ * ("Mã chỉ thị", "Số thùng từ"...), thay thế dữ liệu theo từng chỉ thị. */
+async function importPackingXlsx(file) {
+  if (!file) return;
+  if (typeof XLSX === "undefined") { toast("Chưa tải được thư viện Excel. Kiểm tra mạng rồi thử lại.", "err"); return; }
+  let wb;
+  try { wb = XLSX.read(await file.arrayBuffer(), { type: "array" }); }
+  catch (e) { toast("Không đọc được file Excel.", "err"); return; }
+  const normH = (s) => String(s == null ? "" : s).toLowerCase().replace(/[^a-z0-9à-ỹ]/g, "");
+  const alias = {
+    chi_thi: ["mãchỉthị", "machithi", "chỉthị", "chithi", "mãlệnh", "malenh"],
+    size: ["size"],
+    doi_thung: ["sốđôi/thùng", "sốđôithùng", "sodoithung", "đôithùng", "doithung", "sốđôi", "sodoi"],
+    so_thung: ["sốthùng", "sothung"],
+    tong_doi: ["tổngsốđôi", "tongsodoi", "tổngđôi", "tongdoi"],
+    thung_tu: ["sốthùngtừ", "sốthungtừ", "sothungtu", "thùngtừ", "thungtu", "từ", "tu"],
+    thung_den: ["sốthùngđến", "sốthungđến", "sothungden", "thùngđến", "thungden", "đến", "den"],
+    po: ["po#", "po"],
+    art: ["art#", "art"],
+  };
+  let parsed = null;
+  for (const name of wb.SheetNames) {
+    const ws = wb.Sheets[name];
+    const grid = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+    for (let hi = 0; hi < Math.min(10, grid.length); hi++) {
+      const cols = {};
+      grid[hi].forEach((cell, ci) => {
+        const h = normH(cell);
+        if (!h) return;
+        for (const k of Object.keys(alias)) {
+          if (cols[k] == null && alias[k].indexOf(h) >= 0) cols[k] = ci;
+        }
+      });
+      if (cols.chi_thi != null && cols.thung_tu != null && cols.thung_den != null) {
+        const out = [];
+        for (let r = hi + 1; r < grid.length; r++) {
+          const row = grid[r];
+          const ct = String(row[cols.chi_thi] || "").trim().toUpperCase();
+          const t = parseInt(row[cols.thung_tu], 10), d = parseInt(row[cols.thung_den], 10);
+          if (!ct || !(t >= 1) || !(d >= t)) continue;
+          const num = (k, fb) => {
+            if (cols[k] == null) return fb;
+            const v = parseInt(String(row[cols[k]]).replace(/[^\d-]/g, ""), 10);
+            return isNaN(v) ? fb : v;
+          };
+          const sz = cols.size != null ? String(row[cols.size]).trim() : "";
+          if (!sz) continue;
+          const doi = num("doi_thung", 6), st = num("so_thung", d - t + 1);
+          out.push({
+            chi_thi: ct, size: sz, doi_thung: doi, so_thung: st,
+            tong_doi: cols.tong_doi != null ? num("tong_doi", st * doi) : st * doi,
+            thung_tu: t, thung_den: d,
+            po: cols.po != null ? String(row[cols.po] || "").trim() : "",
+            art: cols.art != null ? String(row[cols.art] || "").trim().toUpperCase() : "",
+            updated_at: new Date().toISOString(),
+          });
+        }
+        if (out.length) { parsed = out; break; }
+      }
+    }
+    if (parsed) break;
+  }
+  if (!parsed || !parsed.length) { toast("Không tìm thấy bảng packing hợp lệ trong file (cần cột Mã chỉ thị, Số thùng từ/đến).", "err"); return; }
+  const dirs = [...new Set(parsed.map((r) => r.chi_thi))];
+  if (!confirm("Import " + parsed.length + " khoảng của " + dirs.length + " chỉ thị? Dữ liệu packing cũ của các chỉ thị này sẽ được THAY THẾ.")) return;
+  toast("Đang import " + parsed.length + " khoảng…", "");
+  try {
+    for (let i = 0; i < dirs.length; i += 200) {
+      const { error } = await supa.from("packing_ranges").delete().in("chi_thi", dirs.slice(i, i + 200));
+      if (error) throw error;
+    }
+    for (let i = 0; i < parsed.length; i += 200) {
+      const { error } = await supa.from("packing_ranges")
+        .upsert(parsed.slice(i, i + 200), { onConflict: "chi_thi,thung_tu,thung_den" });
+      if (error) throw error;
+    }
+    await loadPacking();
+    toast("Import xong " + parsed.length + " khoảng packing (" + dirs.length + " chỉ thị).", "ok");
+  } catch (e) {
+    toast("Lỗi import: " + (e.message || e), "err");
+  }
+}
+
+/* ---------------- v5.0: báo cáo sản lượng ----------------
+ * Đúng mẫu packing list: mỗi khoảng thùng 1 dòng; đếm số thùng DUY NHẤT
+ * đã quét nằm trong [thung_tu, thung_den] (P), số đôi đã quét Q = P × doi_thùng.
+ * Dòng còn thiếu (Còn lại > 0) được tô đỏ để dễ phát hiện. */
+function openReportModal() {
+  openModal("📊 Báo cáo sản lượng",
+    "<div class='field'><label>Ngày báo cáo</label><input type='date' id='rpDate' value='" + todayStr() + "'></div>" +
+    "<div class='field'><label>Lọc số pallet (để trống = tất cả)</label>" +
+    "<input id='rpPallet' placeholder='VD: NK'></div>" +
+    "<p class='sec-hint'>Mỗi khoảng thùng 1 dòng theo đúng mẫu packing list. " +
+    (isAdmin() ? "Báo cáo tính trên toàn bộ bản ghi." : "Báo cáo chỉ tính các mã do bạn quét.") + "</p>",
+    "Xuất Excel", async () => {
+      const day = $("rpDate").value || todayStr();
+      const pq = ($("rpPallet").value || "").trim().toLowerCase();
+      closeModal();
+      await exportReport(day, pq);
+    });
+}
+/* Lấy toàn bộ bản ghi của 1 ngày (giờ VN) trực tiếp từ server —
+ * không phụ thuộc giới hạn 500 dòng đang hiển thị trên bảng. */
+async function fetchDayRecords(day) {
+  const t0 = new Date(day + "T00:00:00+07:00");
+  const t1 = new Date(t0); t1.setDate(t1.getDate() + 1);
+  const cols = schemaV4 ? "content,chi_thi,session,scanned_at" : "content,session,scanned_at";
+  let all = [], from = 0;
+  for (;;) {
+    let q = supa.from("records").select(cols)
+      .gte("scanned_at", t0.toISOString()).lt("scanned_at", t1.toISOString())
+      .order("scanned_at").range(from, from + 999);
+    if (!isAdmin()) q = q.eq("user_id", state.me.id);
+    const { data, error } = await q;
+    if (error) throw error;
+    all = all.concat(data || []);
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+  return all;
+}
+function computeReport(dayRows) {
+  const seen = new Map(); // dedupe: mỗi số thùng chỉ đếm 1 lần
+  dayRows.forEach((r) => { const k = norm(r.content || ""); if (k && !seen.has(k)) seen.set(k, r); });
+  const byChi = new Map();
+  seen.forEach((r) => {
+    const ct = (r.chi_thi || parseChiThi(r.content || "")).toUpperCase();
+    if (!ct) return;
+    if (!byChi.has(ct)) byChi.set(ct, []);
+    byChi.get(ct).push(r);
+  });
+  const rows = [], noPack = [];
+  [...byChi.keys()].sort().forEach((ct) => {
+    const ranges = state.packingByChi.get(ct);
+    const list = byChi.get(ct);
+    if (!ranges || !ranges.length) { noPack.push({ chi_thi: ct, count: list.length }); return; }
+    ranges.forEach((rg) => {
+      let p = 0;
+      for (const r of list) {
+        const n = boxSeq(r.content, ct);
+        if (n != null && rg.thung_tu <= n && n <= rg.thung_den) p++;
+      }
+      rows.push({ rg: rg, p: p, q: p * (rg.doi_thung || 0), left: (rg.so_thung || 0) - p });
+    });
+  });
+  return { rows: rows, noPack: noPack, totalScans: seen.size };
+}
+async function exportReport(day, palletQ) {
+  if (!state.packingReady || !state.packing.length) {
+    toast("Chưa có packing list. Admin hãy chạy migration-v5.0.sql hoặc import Excel packing.", "warn"); return;
+  }
+  if (!(await ensureExcelJS())) {
+    toast("Chưa tải được thư viện Excel (cần mạng). Thử lại.", "err"); return;
+  }
+  toast("Đang tính báo cáo ngày " + day + "…", "");
+  let dayRows;
+  try { dayRows = await fetchDayRecords(day); }
+  catch (e) { toast("Không tải được bản ghi: " + (e.message || e), "err"); return; }
+  if (palletQ) dayRows = dayRows.filter((r) => (r.session || "").toLowerCase().includes(palletQ));
+  const rep = computeReport(dayRows);
+  if (!rep.rows.length && !rep.noPack.length) { toast("Ngày " + day + " chưa có bản ghi nào.", "warn"); return; }
+
+  const headers = ["STT", "Mã chỉ thị", "Po#", "Art#", "SIZE", "Tổng số đôi (KH)",
+    "Số đôi/thùng", "Số thùng (KH)", "Số thùng từ", "Số thùng đến",
+    "Đã quét (thùng)", "Số đôi đã quét", "Còn lại (thùng)"];
+  const NC = headers.length;
+  const widths = [8, 16, 18, 14, 12, 18, 14, 15, 14, 14, 16, 16, 16];
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "QuetDoc QRcode";
+  const ws = wb.addWorksheet("Báo cáo sản lượng");
+  ws.columns = widths.map((w) => ({ width: w }));
+  // Tiêu đề
+  ws.mergeCells(1, 1, 1, NC);
+  const tc = ws.getCell(1, 1);
+  const palTxt = palletQ ? " · pallet: " + palletQ : "";
+  tc.value = "BÁO CÁO SẢN LƯỢNG : " + day.split("-").reverse().join("/") +
+    palTxt + "  (" + rep.totalScans + " mã quét, dedupe)";
+  tc.font = { name: "Arial", size: 14, bold: true };
+  tc.alignment = { horizontal: "center", vertical: "middle" };
+  ws.getRow(1).height = 26;
+  ws.addRow(headers);
+  xlHeaderRow(ws, 2, NC);
+  let sP = 0, sQ = 0, sL = 0, sT = 0;
+  rep.rows.forEach((it, i) => {
+    const g = it.rg;
+    sP += it.p; sQ += it.q; sL += it.left; sT += g.so_thung || 0;
+    const row = ws.addRow([i + 1, g.chi_thi, g.po || "", g.art || "",
+      +g.size || g.size, g.tong_doi || 0, g.doi_thung || 0, g.so_thung || 0,
+      g.thung_tu, g.thung_den, it.p, it.q, it.left]);
+    row.eachCell((cell, cn) => xlBodyCell(cell, cn !== 3 && cn !== 4));
+    const leftCell = row.getCell(NC); // Còn lại: đỏ = còn thiếu, xanh = quét đủ
+    if (it.left > 0) {
+      leftCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFECACA" } };
+      leftCell.font = { name: "Arial", size: 11, bold: true, color: { argb: "FF991B1B" } };
+    } else {
+      leftCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFBBF7D0" } };
+    }
+  });
+  const tr = ws.addRow(["", "TỔNG", "", "", "", "", "", sT, "", "", sP, sQ, sL]);
+  tr.eachCell((cell) => {
+    cell.font = { name: "Arial", size: 11, bold: true };
+    cell.alignment = { vertical: "middle", horizontal: "center" };
+    cell.border = xlBorder();
+  });
+  if (rep.noPack.length) {
+    const ws2 = wb.addWorksheet("Chưa có packing");
+    ws2.columns = [{ width: 8 }, { width: 18 }, { width: 16 }];
+    ws2.mergeCells(1, 1, 1, 3);
+    const t2 = ws2.getCell(1, 1);
+    t2.value = "CÁC CHỈ THỊ CHƯA CÓ PACKING LIST (" + day.split("-").reverse().join("/") + ")";
+    t2.font = { name: "Arial", size: 13, bold: true };
+    t2.alignment = { horizontal: "center", vertical: "middle" };
+    ws2.addRow(["STT", "Chỉ thị", "Số mã quét"]);
+    xlHeaderRow(ws2, 2, 3);
+    rep.noPack.forEach((x, i) => {
+      const row = ws2.addRow([i + 1, x.chi_thi, x.count]);
+      row.eachCell((cell, cn) => xlBodyCell(cell, cn !== 2));
+    });
+  }
+  const stamp = day.replace(/-/g, "") + "_" +
+    new Date().toLocaleTimeString("vi-VN", { timeZone: TZ, hour12: false }).replace(/:/g, "");
+  xlDownload(await wb.xlsx.writeBuffer(), "Bao_Cao_San_Luong_" + stamp + ".xlsx");
+  toast("Đã xuất báo cáo sản lượng (" + rep.rows.length + " khoảng, " + rep.totalScans + " mã duy nhất).", "ok");
+}
+
 /* Xóa TOÀN BỘ bản ghi quét của mọi tài khoản (chỉ admin).
  * Yêu cầu gõ đúng cụm xác nhận để tránh bấm nhầm. */
 function adminWipeAll() {
@@ -1050,15 +1451,87 @@ function download(name, content, type) {
   document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
 }
+/* ---- v5.0: xuất Excel CÓ định dạng (ExcelJS) ----
+ * SheetJS bản cộng đồng (0.18.5) KHÔNG ghi được style (đã kiểm chứng) nên
+ * header vàng #F59E0B theo mẫu yêu cầu phải dùng ExcelJS (tải khi cần, có cache).
+ * Tải lỗi -> rớt về SheetJS (đủ dữ liệu, mất màu). */
+const XL_YELLOW = "FFF59E0B";
+function ensureExcelJS() {
+  if (window.ExcelJS) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";
+    s.onload = () => resolve(!!window.ExcelJS);
+    s.onerror = () => resolve(false);
+    document.head.appendChild(s);
+  });
+}
+function xlBorder() {
+  const t = { style: "thin", color: { argb: "FF94A3B8" } };
+  return { top: t, left: t, bottom: t, right: t };
+}
+function xlHeaderRow(ws, rowNum, ncols) {
+  const row = ws.getRow(rowNum);
+  for (let c = 1; c <= ncols; c++) {
+    const cell = row.getCell(c);
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XL_YELLOW } };
+    cell.font = { name: "Arial", size: 11, bold: true, color: { argb: "FF0F172A" } };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    cell.border = xlBorder();
+  }
+  row.height = 22;
+}
+function xlBodyCell(cell, center) {
+  cell.font = { name: "Arial", size: 11 };
+  cell.alignment = { vertical: "middle", horizontal: center ? "center" : "left" };
+  cell.border = xlBorder();
+}
+function xlDownload(buf, name) {
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
 /* Xuất Excel .xlsx đúng mẫu tem thùng: 1 sheet/ngày, header vàng, cột
  * STT | Chỉ thị | PO | Size/số đôi | Số thùng | Số pallet | Giờ quét | Người quét */
 async function exportExcel() {
   const list = filteredRecords();
   if (!list.length) { toast("Không có bản ghi nào để xuất.", "warn"); return; }
+  const stamp = todayStr().replace(/-/g, "") + "_" +
+    new Date().toLocaleTimeString("vi-VN", { timeZone: TZ, hour12: false }).replace(/:/g, "");
+  if (await ensureExcelJS()) {
+    const groups = {};
+    list.forEach((r) => {
+      const d = new Date(r.scannedAt).toLocaleDateString("en-CA", { timeZone: TZ });
+      (groups[d] = groups[d] || []).push(r);
+    });
+    const headers = ["STT", "Chỉ thị", "PO", "Size/số đôi", "Số thùng", "Số pallet", "Giờ quét", "Người quét"];
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "QuetDoc QRcode";
+    Object.keys(groups).sort().forEach((day) => {
+      const ws = wb.addWorksheet(day);
+      ws.columns = [{ width: 8 }, { width: 16 }, { width: 18 }, { width: 14 },
+                    { width: 22 }, { width: 14 }, { width: 12 }, { width: 14 }];
+      ws.addRow(headers);
+      xlHeaderRow(ws, 1, headers.length);
+      groups[day].slice().sort((a, b) => new Date(a.scannedAt) - new Date(b.scannedAt))
+        .forEach((r, i) => {
+          const row = ws.addRow([i + 1, r.chiThi || "", r.po || "", r.size || "",
+            r.content || "", r.session || "", fmtTimeOnly(r.scannedAt), r.username || ""]);
+          row.eachCell((cell, cn) => xlBodyCell(cell, cn === 1 || cn === 7));
+        });
+    });
+    xlDownload(await wb.xlsx.writeBuffer(), "Ket_Qua_Quet_Ma_" + stamp + ".xlsx");
+    toast("Đã xuất file Excel (" + list.length + " bản ghi, " + Object.keys(groups).length + " sheet).", "ok");
+    return;
+  }
+  // Fallback: SheetJS (đủ dữ liệu, không có màu) khi không tải được ExcelJS
   if (typeof XLSX === "undefined") {
     toast("Chưa tải được thư viện Excel. Kiểm tra mạng rồi thử lại (hoặc dùng Xuất CSV).", "err");
     return;
   }
+  toast("Không tải được thư viện định dạng Excel — xuất bản không màu.", "warn");
   const groups = {};
   list.forEach((r) => {
     const d = new Date(r.scannedAt).toLocaleDateString("en-CA", { timeZone: TZ });
@@ -1102,8 +1575,6 @@ async function exportExcel() {
     ws["!cols"] = [{ wch: 8 }, { wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 22 }, { wch: 14 }, { wch: 12 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, ws, day);
   });
-  const stamp = todayStr().replace(/-/g, "") + "_" +
-    new Date().toLocaleTimeString("vi-VN", { timeZone: TZ, hour12: false }).replace(/:/g, "");
   XLSX.writeFile(wb, "Ket_Qua_Quet_Ma_" + stamp + ".xlsx");
   toast("Đã xuất file Excel (" + list.length + " bản ghi, " + Object.keys(groups).length + " sheet).", "ok");
 }
@@ -1355,12 +1826,18 @@ function bindEvents() {
   $("btnExportXlsx").addEventListener("click", exportExcel);
   $("btnExportCsv").addEventListener("click", exportCSV);
   $("btnExportJson").addEventListener("click", exportJSON);
+  $("btnExportReport").addEventListener("click", openReportModal); // v5.0: báo cáo sản lượng
   $("btnClear").addEventListener("click", clearAll);
 
   $("btnMasterAdd").addEventListener("click", () => masterForm("", ""));
   $("btnMasterImport").addEventListener("click", () => $("masterFile").click());
   $("masterFile").addEventListener("change", (e) => { importMasterCSV(e.target.files[0]); e.target.value = ""; });
   $("masterSearch").addEventListener("input", renderMaster);
+
+  $("btnPackingImport").addEventListener("click", () => $("packingFile").click()); // v5.0
+  $("packingFile").addEventListener("change", (e) => { importPackingXlsx(e.target.files[0]); e.target.value = ""; });
+  $("btnPackingAdd").addEventListener("click", () => packingForm("", "", ""));
+  $("packingSearch").addEventListener("input", renderPacking);
 
   $("btnWipeAll").addEventListener("click", adminWipeAll);
 
