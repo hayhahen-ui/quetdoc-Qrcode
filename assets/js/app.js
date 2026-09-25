@@ -549,8 +549,14 @@ async function startScan() {
   try {
     await html5Qr.start(
       camId,
-      { fps: 12, qrbox: (w, h) => ({ width: Math.min(w, h) * 0.75, height: Math.min(w, h) * 0.75 }),
+      { fps: 15, qrbox: (w, h) => ({ width: Math.min(w, h) * 0.75, height: Math.min(w, h) * 0.75 }),
         aspectRatio: 1.0,
+        // Ưu tiên bộ giải mã native của trình duyệt (nhanh hơn nhiều trên Chrome/Android),
+        // tự động dùng zxing (JS) khi thiết bị không hỗ trợ.
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+        // Lấy nét liên tục + độ phân giải tốt giúp đọc mã nhanh và chính xác hơn trên điện thoại
+        videoConstraints: { width: { min: 640, ideal: 1280 }, height: { min: 480, ideal: 720 },
+                            advanced: [{ focusMode: "continuous" }] },
         formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.CODE_128,
           Html5QrcodeSupportedFormats.CODE_39, Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
           Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.DATA_MATRIX] },
@@ -562,7 +568,7 @@ async function startScan() {
     $("btnStart").disabled = true; $("btnStop").disabled = false;
     $("cameraSelect").disabled = true;
     setCamStatus("🟢 <b>Đang quét</b> — hướng camera vào mã", "ok");
-    updateTorchBtn();
+    updateTorchBtn(); updateZoomCtl();
   } catch (e) {
     setCamStatus("🔴 Không mở được camera", "warn");
     toast("Không mở được camera: " + (e && e.message ? e.message : e) + ". Hãy cấp quyền camera hoặc dùng HTTPS.", "err");
@@ -577,6 +583,8 @@ async function stopScan() {
   if (bs) { bs.disabled = false; bt.disabled = true; cs.disabled = false; }
   const tb = $("btnTorch");
   if (tb) tb.classList.add("hidden");
+  const zr = $("zoomRow");
+  if (zr) zr.classList.add("hidden");
   const rd = $("reader");
   if (rd) rd.innerHTML = '<div class="reader-idle">📷<br>Nhấn <b>Bắt đầu quét</b> để mở camera</div>';
   setCamStatus("⚪ Camera đang tắt", "");
@@ -590,8 +598,25 @@ function updateTorchBtn() {
     btn.classList.toggle("hidden", !caps.torch);
   } catch (e) { btn.classList.add("hidden"); }
 }
-async function toggleTorch() {
+/* Thu phóng camera: chỉ hiện thanh trượt khi thiết bị hỗ trợ (mã nhỏ, mã ở xa đọc tốt hơn) */
+function updateZoomCtl() {
+  const row = $("zoomRow"), range = $("zoomRange");
   try {
+    const video = document.querySelector("#reader video");
+    const tr = video && video.srcObject ? video.srcObject.getVideoTracks()[0] : null;
+    const caps = tr && tr.getCapabilities ? tr.getCapabilities() : {};
+    if (caps.zoom) {
+      range.min = caps.zoom.min; range.max = caps.zoom.max; range.step = caps.zoom.step || 0.1;
+      const cur = (tr.getSettings && tr.getSettings().zoom) || caps.zoom.min;
+      range.value = cur;
+      $("zoomVal").textContent = "×" + Number(cur).toFixed(1);
+      row.classList.remove("hidden");
+      return;
+    }
+  } catch (e) {}
+  row.classList.add("hidden");
+}
+async function toggleTorch() {  try {
     const video = document.querySelector("#reader video");
     const tr = video && video.srcObject ? video.srcObject.getVideoTracks()[0] : null;
     if (!tr) return;
@@ -621,6 +646,15 @@ function bindEvents() {
   $("btnStart").addEventListener("click", startScan);
   $("btnStop").addEventListener("click", stopScan);
   $("btnTorch").addEventListener("click", toggleTorch);
+  $("zoomRange").addEventListener("input", async (e) => {
+    const v = parseFloat(e.target.value);
+    $("zoomVal").textContent = "×" + v.toFixed(1);
+    try {
+      const video = document.querySelector("#reader video");
+      const tr = video && video.srcObject ? video.srcObject.getVideoTracks()[0] : null;
+      if (tr) await tr.applyConstraints({ advanced: [{ zoom: v }] });
+    } catch (err) { /* thiết bị không hỗ trợ thì bỏ qua */ }
+  });
   $("cameraSelect").addEventListener("change", (e) => { state.cameraId = e.target.value; });
   $("btnRefreshCam").addEventListener("click", listCameras);
 

@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0A0D14">
 <meta name="description" content="QuetDoc QRcode — Quét mã QR/barcode bằng camera và ghi nhận dữ liệu, phân quyền quản trị / nhân viên.">
 <title>QuetDoc QRcode · Quét mã & ghi nhận dữ liệu</title>
-<link rel="stylesheet" href="assets/css/styles.css?v=3.0">
+<link rel="stylesheet" href="assets/css/styles.css?v=3.1">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" async></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" async></script>
 </head>
@@ -77,6 +77,13 @@
           <select id="cameraSelect"><option>Đang tìm camera…</option></select>
         </div>
         <button class="small" id="btnRefreshCam" title="Quét lại danh sách camera">↻</button>
+      </div>
+
+      <div class="rowflex hidden" id="zoomRow" style="margin-top:8px">
+        <div class="field inline" style="flex:1">
+          <label for="zoomRange">🔍 Thu phóng <span id="zoomVal" class="muted"></span></label>
+          <input type="range" id="zoomRange" min="1" max="1" step="0.1" value="1" style="width:100%">
+        </div>
       </div>
 
       <div class="btnrow">
@@ -193,6 +200,6 @@
 </div>
 
 <div id="toasts"></div>
-<script src="assets/js/app.js?v=3.0" defer></script>
+<script src="assets/js/app.js?v=3.1" defer></script>
 </body>
 </html>

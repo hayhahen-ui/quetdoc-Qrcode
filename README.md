@@ -24,6 +24,9 @@ Quét mã **QR / barcode** bằng camera và **ghi nhận dữ liệu** (nội d
 
 - 🔐 Đăng nhập phân quyền **admin / nhân viên** (Supabase Auth)
 - 📷 Quét live bằng camera (chọn camera trước/sau, bật đèn flash nếu máy hỗ trợ)
+  - **Engine v3.1**: ưu tiên bộ giải mã native của trình duyệt (`BarcodeDetector`, nhanh hơn nhiều trên Chrome/Android), tự fallback về zxing
+  - Lấy nét liên tục (`focusMode: continuous`) + độ phân giải 720p — đọc mã nhanh và chính xác hơn
+  - 🔍 Thanh trượt **thu phóng camera** (khi máy hỗ trợ) — đọc mã nhỏ / mã ở xa tốt hơn
 - 🖼 Quét mã từ ảnh tải lên · ⌨️ nhập tay khi không quét được
 - 🛡 Mỗi mã chỉ ghi nhận **1 lần duy nhất trên toàn hệ thống** — quét trùng thì bỏ qua, chỉ cảnh báo "Đã được quét"
 - ☁️ Đồng bộ trực tiếp đa thiết bị (Supabase + realtime)
