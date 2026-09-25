@@ -45,6 +45,7 @@ const state = {
   cameras: [],
   cameraId: null,
   camManual: false,     // true khi user tự chọn camera trong dropdown
+  realFacing: "",       // facingMode THỰC TẾ đọc từ camera track ("environment"/"user")
   torchOn: false,
   lastContent: "",
   lastAt: 0,
@@ -540,6 +541,10 @@ async function listCameras() {
   if (has(state.cameraId)) sel.value = state.cameraId;
   else sel.value = (back || state.cameras[0]).id;
   state.cameraId = sel.value;
+  // Hiển thị facingMode THỰC TẾ (đọc từ camera track) thay vì tin nhãn trình duyệt (đôi khi sai)
+  const selOpt = sel.selectedOptions && sel.selectedOptions[0];
+  if (selOpt && state.realFacing === "environment") selOpt.textContent = "📷 Camera sau — đang dùng";
+  else if (selOpt && state.realFacing === "user") selOpt.textContent = "🤳 Camera trước — đang dùng";
 }
 
 async function startScan() {
@@ -578,12 +583,14 @@ async function startScan() {
     setCamStatus("🟢 <b>Đang quét</b> — hướng camera vào mã", "ok");
     updateTorchBtn(); updateZoomCtl();
     // Sau khi cấp quyền, trình duyệt mới hiện tên camera thật -> tải lại để dropdown
-    // hiện đúng tên và trỏ đúng camera đang dùng.
+    // hiện đúng tên và trỏ đúng camera đang dùng. Đọc facingMode thực tế từ track
+    // (nhãn enumerateDevices đôi khi sai trên một số máy Android).
     try {
       const video = document.querySelector("#reader video");
       const tr = video && video.srcObject ? video.srcObject.getVideoTracks()[0] : null;
-      const realId = tr && tr.getSettings ? tr.getSettings().deviceId : null;
-      if (realId) state.cameraId = realId;
+      const st = tr && tr.getSettings ? tr.getSettings() : {};
+      if (st.deviceId) state.cameraId = st.deviceId;
+      state.realFacing = st.facingMode || "";
     } catch (e) {}
     listCameras();
   } catch (e) {
@@ -595,7 +602,7 @@ async function stopScan() {
   if (!state.scanning || !html5Qr) return;
   try { await html5Qr.stop(); } catch (e) {}
   try { html5Qr.clear(); } catch (e) {}
-  state.scanning = false; state.torchOn = false;
+  state.scanning = false; state.torchOn = false; state.realFacing = "";
   const bs = $("btnStart"), bt = $("btnStop"), cs = $("cameraSelect");
   if (bs) { bs.disabled = false; bt.disabled = true; cs.disabled = false; }
   const tb = $("btnTorch");
