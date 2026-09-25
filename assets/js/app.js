@@ -551,29 +551,33 @@ async function startScan() {
   if (state.scanning) return;
   if (typeof Html5Qrcode === "undefined") { toast("Chưa tải được thư viện quét mã. Kiểm tra mạng rồi tải lại trang.", "err"); return; }
   const camId = $("cameraSelect").value;
-  if (!camId && !state.camManual) { toast("Không tìm thấy camera trên thiết bị này.", "err"); return; }
+  if (!camId && !state.cameras.length) { toast("Không tìm thấy camera trên thiết bị này.", "err"); return; }
+
+  // Chọn camera: (1) user chọn tay -> deviceId exact; (2) camera sau theo tên -> deviceId exact;
+  // (3) chưa đọc được tên -> facingMode environment.
+  const backCam = state.cameras.find((c) => /(facing back|\bback\b|\brear\b|environment)/i.test(c.label || ""));
+  const camPick = (state.camManual && camId) ? { deviceId: { exact: camId } }
+    : backCam ? { deviceId: { exact: backCam.id } }
+    : { facingMode: "environment" };
 
   $("reader").innerHTML = "";
   html5Qr = new Html5Qrcode("reader");
   setCamStatus("⏳ Đang mở camera…", "");
-  // Chưa chọn tay -> ưu tiên camera sau XÁC ĐỊNH RÕ theo tên (deviceId exact).
-  // Lý do: facingMode:"environment" trên một số máy Android vẫn mở nhầm camera trước.
-  // Sau khi đã cấp quyền, tên camera đọc được đầy đủ ("camera 0, facing back") nên cách này chính xác nhất.
-  const backCam = state.cameras.find((c) => /(facing back|\bback\b|\brear\b|environment)/i.test(c.label || ""));
-  const camConstraint = (state.camManual && camId) ? camId
-    : backCam ? { deviceId: { exact: backCam.id } }
-    : { facingMode: "environment" };
   try {
     await html5Qr.start(
-      camConstraint,
+      // LƯU Ý (audit 25/09/2026): html5-qrcode 2.3.8 BỎ QUA tham số camera thứ nhất khi
+      // config.videoConstraints tồn tại -> bắt buộc gộp deviceId/facingMode VÀO videoConstraints.
+      camPick,
       { fps: 15, qrbox: (w, h) => ({ width: Math.min(w, h) * 0.75, height: Math.min(w, h) * 0.75 }),
         aspectRatio: 1.0,
         // Ưu tiên bộ giải mã native của trình duyệt (nhanh hơn nhiều trên Chrome/Android),
         // tự động dùng zxing (JS) khi thiết bị không hỗ trợ.
         experimentalFeatures: { useBarCodeDetectorIfSupported: true },
         // Lấy nét liên tục + độ phân giải tốt giúp đọc mã nhanh và chính xác hơn trên điện thoại
-        videoConstraints: { width: { min: 640, ideal: 1280 }, height: { min: 480, ideal: 720 },
-                            advanced: [{ focusMode: "continuous" }] },
+        videoConstraints: Object.assign(
+          { width: { min: 640, ideal: 1280 }, height: { min: 480, ideal: 720 },
+            advanced: [{ focusMode: "continuous" }] },
+          camPick),
         formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.CODE_128,
           Html5QrcodeSupportedFormats.CODE_39, Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
           Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.DATA_MATRIX] },
