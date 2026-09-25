@@ -4,12 +4,39 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#0A0D14">
-<meta name="description" content="QuetDoc QRcode — Quét mã QR/barcode bằng camera và ghi nhận dữ liệu. Chạy ngay trên trình duyệt, không cần tài khoản.">
+<meta name="description" content="QuetDoc QRcode — Quét mã QR/barcode bằng camera và ghi nhận dữ liệu, phân quyền quản trị / nhân viên.">
 <title>QuetDoc QRcode · Quét mã & ghi nhận dữ liệu</title>
 <link rel="stylesheet" href="assets/css/styles.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" defer></script>
 </head>
 <body>
+
+<!-- ============ MÀN HÌNH ĐĂNG NHẬP ============ -->
+<div id="viewLogin" class="login-wrap hidden">
+  <div class="login-card card">
+    <div class="logo big">📷</div>
+    <h1>QuetDoc QRcode</h1>
+    <p class="sub">Đăng nhập để quét mã &amp; ghi nhận dữ liệu</p>
+    <div class="field">
+      <label for="loginUser">Tên đăng nhập</label>
+      <input type="text" id="loginUser" autocomplete="username" placeholder="VD: user1">
+    </div>
+    <div class="field">
+      <label for="loginPass">Mật khẩu</label>
+      <input type="password" id="loginPass" autocomplete="current-password" placeholder="••••••">
+    </div>
+    <div class="err" id="loginErr"></div>
+    <button class="primary" id="btnLogin" style="width:100%">Đăng nhập</button>
+    <details class="hint">
+      <summary>Tài khoản mặc định</summary>
+      <div style="margin-top:8px">🛡 Quản trị: <code>admin / admin</code></div>
+      <div>👤 Nhân viên: <code>user1</code> … <code>user5</code> / <code>123456</code></div>
+    </details>
+  </div>
+</div>
+
+<!-- ============ APP CHÍNH ============ -->
+<div id="viewApp" class="hidden">
 <div class="wrap">
 
   <header class="top">
@@ -21,23 +48,24 @@
       </div>
     </div>
     <div class="chips">
+      <span class="chip userchip">👤 <b id="chipName">—</b> <span class="role user" id="chipRole"></span></span>
       <span class="chip" id="httpsStatus">…</span>
       <span class="chip" id="camStatus">…</span>
-      <span class="chip">💾 <b>Lưu cục bộ</b> trên máy bạn</span>
+      <button class="small" id="btnLogout">Đăng xuất</button>
     </div>
   </header>
 
   <section class="kpis">
     <div class="card kpi"><i style="background:var(--blue)"></i><div class="l">Tổng lượt quét</div><div class="v" id="kpiTotal">0</div><div class="h">mọi thời điểm</div></div>
     <div class="card kpi"><i style="background:var(--emerald)"></i><div class="l">Hôm nay</div><div class="v" id="kpiToday">0</div><div class="h">theo giờ Việt Nam</div></div>
-    <div class="card kpi"><i style="background:var(--amber)"></i><div class="l">Mã duy nhất</div><div class="v" id="kpiUniq">0</div><div class="h">không tính trùng</div></div>
-    <div class="card kpi"><i style="background:var(--red)"></i><div class="l">Trùng lặp</div><div class="v" id="kpiDup">0</div><div class="h">đã quét trước đó</div></div>
+    <div class="card kpi"><i style="background:var(--amber)"></i><div class="l">Mã duy nhất</div><div class="v" id="kpiUniq">0</div><div class="h">mỗi mã ghi 1 lần</div></div>
+    <div class="card kpi"><i style="background:var(--red)"></i><div class="l">Bỏ qua trùng</div><div class="v" id="kpiDup">0</div><div class="h">mã đã quét trước đó</div></div>
   </section>
 
   <div class="grid2">
     <section class="card pad">
       <h2 class="sec-title">📷 Quét mã</h2>
-      <p class="sec-hint">Hướng camera vào mã QR / barcode. Mỗi mã quét được sẽ tự động ghi nhận kèm thời gian.</p>
+      <p class="sec-hint">Hướng camera vào mã QR / barcode. Mỗi mã chỉ ghi nhận <b>1 lần duy nhất</b> — quét lại sẽ chỉ cảnh báo "Đã được quét".</p>
       <div id="reader"><div class="reader-idle">📷<br>Nhấn <b>Bắt đầu quét</b> để mở camera</div></div>
 
       <div class="rowflex" style="margin-top:12px">
@@ -66,7 +94,7 @@
 
       <div class="rowflex" style="margin-top:12px">
         <div class="field inline">
-          <label for="sessionInput">Phiên / ca / người quét</label>
+          <label for="sessionInput">Phiên / ca / kho</label>
           <input type="text" id="sessionInput" placeholder="VD: Ca sáng 24/09, Kho A…">
         </div>
         <div class="field inline">
@@ -76,7 +104,6 @@
       </div>
 
       <div class="btnrow" style="margin-top:12px">
-        <label class="check"><input type="checkbox" id="chkWarnDup" checked> Cảnh báo mã trùng</label>
         <label class="check"><input type="checkbox" id="chkSound" checked> Âm báo khi quét</label>
       </div>
 
@@ -85,7 +112,7 @@
 
     <section class="card pad">
       <h2 class="sec-title">📋 Dữ liệu đã ghi nhận <span class="muted" style="font-weight:400">(<span id="recCount">0</span>)</span></h2>
-      <p class="sec-hint">Dữ liệu lưu trong trình duyệt của bạn, tắt trang vẫn còn. Xuất CSV để mở bằng Excel.</p>
+      <p class="sec-hint" id="dataHint">Dữ liệu lưu trong trình duyệt của bạn, tắt trang vẫn còn. Xuất CSV để mở bằng Excel.</p>
 
       <div class="toolbar">
         <input type="text" id="searchInput" placeholder="🔍 Tìm nội dung, ghi chú, phiên…" style="flex:2;min-width:160px">
@@ -101,9 +128,7 @@
 
       <div style="overflow-x:auto">
         <table>
-          <thead>
-            <tr><th>#</th><th>Nội dung mã</th><th>Định dạng</th><th>Thời gian quét</th><th>Phiên / Ghi chú</th><th></th></tr>
-          </thead>
+          <thead id="theadRow"></thead>
           <tbody id="tbody"></tbody>
         </table>
       </div>
@@ -115,10 +140,87 @@
     </section>
   </div>
 
+  <!-- ============ QUẢN LÝ TÀI KHOẢN (ADMIN) ============ -->
+  <section class="card pad hidden" id="adminPanel" style="margin-top:12px">
+    <h2 class="sec-title">🛡 Quản lý tài khoản <span class="muted" style="font-weight:400">(chỉ quản trị viên)</span></h2>
+    <p class="sec-hint">Xem, thêm, xóa tài khoản và đặt lại mật khẩu cho nhân viên.</p>
+    <div class="rowflex">
+      <div class="field inline">
+        <label for="newUserName">Tên đăng nhập mới</label>
+        <input type="text" id="newUserName" placeholder="VD: user6">
+      </div>
+      <div class="field inline">
+        <label for="newUserPass">Mật khẩu</label>
+        <input type="password" id="newUserPass" placeholder="Để trống = 123456">
+      </div>
+      <div class="field inline" style="max-width:150px;flex:0 1 150px">
+        <label for="newUserRole">Vai trò</label>
+        <select id="newUserRole">
+          <option value="user">Nhân viên</option>
+          <option value="admin">Quản trị</option>
+        </select>
+      </div>
+      <button id="btnAddUser">＋ Thêm tài khoản</button>
+    </div>
+    <div style="overflow-x:auto;margin-top:12px">
+      <table>
+        <thead><tr><th>Tên đăng nhập</th><th>Vai trò</th><th>Ngày tạo</th><th>Số bản ghi</th><th></th></tr></thead>
+        <tbody id="usersBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ TÀI KHOẢN CỦA TÔI ============ -->
+  <section class="card pad" style="margin-top:12px">
+    <h2 class="sec-title">👤 Tài khoản của tôi</h2>
+    <p class="sec-hint">Đổi tên đăng nhập và mật khẩu của chính bạn.</p>
+    <div class="grid2">
+      <div>
+        <div class="rowflex">
+          <div class="field inline">
+            <label for="chgName">Tên đăng nhập</label>
+            <input type="text" id="chgName" placeholder="Tên đăng nhập mới">
+          </div>
+          <button id="btnChgName">Lưu tên</button>
+        </div>
+      </div>
+      <div>
+        <div class="field" style="margin-top:0">
+          <label for="oldPass">Mật khẩu hiện tại</label>
+          <input type="password" id="oldPass" autocomplete="current-password">
+        </div>
+        <div class="rowflex">
+          <div class="field inline">
+            <label for="newPass">Mật khẩu mới</label>
+            <input type="password" id="newPass" autocomplete="new-password">
+          </div>
+          <div class="field inline">
+            <label for="newPass2">Nhập lại mật khẩu mới</label>
+            <input type="password" id="newPass2" autocomplete="new-password">
+          </div>
+        </div>
+        <button id="btnChgPass" style="margin-top:10px">Đổi mật khẩu</button>
+      </div>
+    </div>
+  </section>
+
   <footer>
     QuetDoc QRcode · chạy 100% trên trình duyệt, dữ liệu không gửi đi đâu.<br>
     💡 Mẹo: mở trang bằng <b>HTTPS</b> thì trình duyệt mới cho phép dùng camera.
   </footer>
+</div>
+</div>
+
+<!-- ============ MODAL ============ -->
+<div id="modal" class="modal hidden">
+  <div class="modal-box card">
+    <h3 id="modalTitle"></h3>
+    <div id="modalBody"></div>
+    <div class="modal-actions">
+      <button id="modalCancel">Hủy</button>
+      <button class="primary" id="modalOk">Đồng ý</button>
+    </div>
+  </div>
 </div>
 
 <div id="toasts"></div>

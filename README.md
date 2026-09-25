@@ -1,17 +1,29 @@
 # QuetDoc QRcode 📷
 
-Quét mã **QR / barcode** bằng camera và **ghi nhận dữ liệu** (nội dung mã, thời gian, phiên, ghi chú) —
-chạy 100% trên trình duyệt, không cần tài khoản, không cần server.
+Quét mã **QR / barcode** bằng camera và **ghi nhận dữ liệu** (nội dung mã, thời gian, phiên, ghi chú, người quét) —
+chạy 100% trên trình duyệt, không cần server. Có **đăng nhập phân quyền** quản trị / nhân viên.
+
+## Tài khoản mặc định
+
+| Tài khoản | Mật khẩu | Quyền |
+|---|---|---|
+| `admin` | `admin` | Full: xem mọi bản ghi, quản lý tài khoản (thêm/xóa/đặt lại MK), xóa toàn bộ dữ liệu |
+| `user1` … `user5` | `123456` | Chỉ quét, chỉ xem bản ghi của mình, đổi tên đăng nhập, đổi mật khẩu |
+
+> Mật khẩu lưu dưới dạng băm SHA-256 + salt. Lưu ý: xác thực chạy hoàn toàn phía
+> trình duyệt (localStorage) nên phù hợp "phân quyền vận hành", chưa phải bảo mật
+> cấp server. Cần bảo mật thật → bổ sung backend (Supabase Auth).
 
 ## Tính năng
 
+- 🔐 Đăng nhập phân quyền **admin / nhân viên**
 - 📷 Quét live bằng camera (chọn camera trước/sau, bật đèn flash nếu máy hỗ trợ)
 - 🖼 Quét mã từ ảnh tải lên · ⌨️ nhập tay khi không quét được
-- ⚠️ Phát hiện **mã trùng**, âm báo + cảnh báo (tùy chỉnh)
+- 🛡 Mỗi mã chỉ ghi nhận **1 lần duy nhất** — quét trùng thì bỏ qua, chỉ cảnh báo "Đã được quét"
 - 💾 Tự động lưu vào trình duyệt (localStorage) — tắt trang vẫn còn
 - 🔍 Tìm kiếm, lọc theo ngày, phân trang
 - ⬇ Xuất **CSV** (mở ngon bằng Excel, có dấu tiếng Việt) và **JSON**
-- 📊 Thống kê: tổng lượt quét / hôm nay / mã duy nhất / trùng lặp
+- 📊 Thống kê: tổng lượt quét / hôm nay / mã duy nhất / lượt bỏ qua trùng
 
 ## Chạy local
 

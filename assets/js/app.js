@@ -1,17 +1,23 @@
-/* QuetDoc QRcode — Quét mã & ghi nhận dữ liệu
+/* QuetDoc QRcode — Quét mã & ghi nhận dữ liệu (có đăng nhập phân quyền)
  * Static app: mọi dữ liệu lưu ở localStorage của trình duyệt, không gửi đi đâu.
+ * - Mỗi mã chỉ ghi nhận 1 lần duy nhất; quét trùng -> cảnh báo "Đã được quét", bỏ qua.
+ * - Phân quyền: admin (quản lý tài khoản) / user (chỉ quét + xem bản ghi của mình).
  */
 "use strict";
 
 const STORE_KEY = "quetdoc_qrcode_v1";
+const USERS_KEY = "quetdoc_users_v1";
+const SESSION_KEY = "quetdoc_session_v1";
 const DUP_COOLDOWN_MS = 2500;
 const PAGE_SIZE = 50;
 const TZ = "Asia/Ho_Chi_Minh";
 
 /* ---------------- state ---------------- */
 const state = {
-  records: [],          // [{id, content, format, scannedAt, session, note, dup}]
-  settings: { session: "", note: "", warnDuplicate: true, sound: true },
+  records: [],          // [{id, content, format, scannedAt, session, note, userId, username}]
+  dupSkipped: 0,        // số lượt quét trùng đã bỏ qua
+  settings: { session: "", note: "", sound: true },
+  me: null,             // user đang đăng nhập {id, username, role}
   scanning: false,
   cameras: [],
   cameraId: null,
@@ -25,31 +31,13 @@ const state = {
 
 let html5Qr = null;
 
-/* ---------------- storage ---------------- */
-function loadStore() {
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (!raw) return;
-    const data = JSON.parse(raw);
-    if (Array.isArray(data.records)) state.records = data.records;
-    if (data.settings && typeof data.settings === "object") {
-      state.settings = Object.assign(state.settings, data.settings);
-    }
-  } catch (e) { console.warn("Không đọc được dữ liệu cũ:", e); }
-}
-function saveStore() {
-  try {
-    localStorage.setItem(STORE_KEY, JSON.stringify({ records: state.records, settings: state.settings, v: 1 }));
-  } catch (e) { toast("Bộ nhớ trình duyệt đầy, không lưu được bản ghi mới.", "err"); }
-}
-
 /* ---------------- helpers ---------------- */
 const $ = (id) => document.getElementById(id);
+const norm = (s) => String(s == null ? "" : s).trim().toUpperCase();
 
 function fmtTime(iso) {
-  try {
-    return new Date(iso).toLocaleString("vi-VN", { timeZone: TZ, hour12: false });
-  } catch (e) { return iso; }
+  try { return new Date(iso).toLocaleString("vi-VN", { timeZone: TZ, hour12: false }); }
+  catch (e) { return iso; }
 }
 function todayStr() {
   return new Date().toLocaleDateString("en-CA", { timeZone: TZ }); // YYYY-MM-DD
@@ -84,17 +72,175 @@ function beep(ok) {
     o.start(); o.stop(ctx.currentTime + 0.25);
   } catch (e) { /* bỏ qua nếu trình duyệt chặn audio */ }
 }
+function beepDup() { beep(false); setTimeout(() => beep(false), 200); }
+
+/* ---------------- storage: bản ghi ---------------- */
+function loadStore() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (Array.isArray(data.records)) state.records = data.records;
+    if (typeof data.dupSkipped === "number") state.dupSkipped = data.dupSkipped;
+    if (data.settings && typeof data.settings === "object") {
+      state.settings = Object.assign(state.settings, data.settings);
+    }
+  } catch (e) { console.warn("Không đọc được dữ liệu cũ:", e); }
+}
+function saveStore() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify({
+      records: state.records, dupSkipped: state.dupSkipped, settings: state.settings, v: 2,
+    }));
+  } catch (e) { toast("Bộ nhớ trình duyệt đầy, không lưu được bản ghi mới.", "err"); }
+}
+
+/* ---------------- auth: băm mật khẩu ---------------- */
+async function sha256Hex(str) {
+  try {
+    if (window.crypto && crypto.subtle) {
+      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+      return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+  } catch (e) { /* rơi xuống fallback */ }
+  // Fallback khi không có crypto.subtle (môi trường không an toàn)
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return "x" + (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
+}
+function makeSalt() {
+  try {
+    const a = new Uint8Array(12);
+    crypto.getRandomValues(a);
+    return Array.from(a).map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch (e) { return "s" + Math.random().toString(36).slice(2) + Date.now().toString(36); }
+}
+const pwHash = (pw, salt) => sha256Hex(salt + "::" + pw);
+
+/* ---------------- auth: users & session ---------------- */
+function getUsers() {
+  try { const u = JSON.parse(localStorage.getItem(USERS_KEY)); return Array.isArray(u) ? u : []; }
+  catch (e) { return []; }
+}
+function saveUsers(u) { localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
+function findUserByName(name) {
+  const n = String(name || "").trim().toLowerCase();
+  return getUsers().find((u) => u.username.toLowerCase() === n) || null;
+}
+async function seedUsers() {
+  if (localStorage.getItem(USERS_KEY) != null) return;
+  const users = [];
+  const add = async (username, password, role) => {
+    const salt = makeSalt();
+    users.push({ id: uid(), username, salt, passHash: await pwHash(password, salt), role, createdAt: new Date().toISOString() });
+  };
+  await add("admin", "admin", "admin");
+  for (let i = 1; i <= 5; i++) await add("user" + i, "123456", "user");
+  saveUsers(users);
+}
+function getSession() {
+  try { return JSON.parse(localStorage.getItem(SESSION_KEY)); } catch (e) { return null; }
+}
+function setSession(s) {
+  if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+  else localStorage.removeItem(SESSION_KEY);
+}
+function currentUser() {
+  const s = getSession();
+  if (!s || !s.userId) return null;
+  return getUsers().find((u) => u.id === s.userId) || null;
+}
+const isAdmin = () => !!(state.me && state.me.role === "admin");
+
+async function doLogin() {
+  const name = $("loginUser").value.trim();
+  const pass = $("loginPass").value;
+  const err = $("loginErr");
+  err.textContent = "";
+  if (!name || !pass) { err.textContent = "Nhập tên đăng nhập và mật khẩu."; return; }
+  const user = findUserByName(name);
+  if (!user) { err.textContent = "Sai tên đăng nhập hoặc mật khẩu."; return; }
+  const h = await pwHash(pass, user.salt);
+  if (h !== user.passHash) { err.textContent = "Sai tên đăng nhập hoặc mật khẩu."; return; }
+  setSession({ userId: user.id, ts: Date.now() });
+  $("loginPass").value = "";
+  toast("Xin chào, " + user.username + "!", "ok");
+  enterApp();
+}
+function doLogout() {
+  stopScan();
+  setSession(null);
+  state.me = null;
+  $("viewApp").classList.add("hidden");
+  $("viewLogin").classList.remove("hidden");
+  $("loginUser").value = "";
+  $("loginErr").textContent = "";
+}
+function enterApp() {
+  state.me = currentUser();
+  if (!state.me) { doLogout(); return; }
+  $("viewLogin").classList.add("hidden");
+  $("viewApp").classList.remove("hidden");
+  $("chipName").textContent = state.me.username;
+  const rc = $("chipRole");
+  rc.textContent = state.me.role === "admin" ? "Quản trị" : "Nhân viên";
+  rc.className = "role " + state.me.role;
+  $("chgName").value = state.me.username;
+  const admin = isAdmin();
+  $("adminPanel").classList.toggle("hidden", !admin);
+  $("btnClear").innerHTML = admin ? "🗑 Xóa tất cả" : "🗑 Xóa bản ghi của tôi";
+  $("dataHint").textContent = admin
+    ? "Bạn đang xem toàn bộ bản ghi của mọi tài khoản. Xuất CSV để mở bằng Excel."
+    : "Bạn chỉ xem được các mã do chính mình quét. Dữ liệu lưu trong trình duyệt, tắt trang vẫn còn.";
+  state.page = 0;
+  renderHead(); renderUsers(); renderAll();
+}
+
+/* ---------------- modal ---------------- */
+let modalOkFn = null;
+function openModal(title, bodyHTML, okLabel, onOk) {
+  $("modalTitle").textContent = title;
+  $("modalBody").innerHTML = bodyHTML;
+  $("modalOk").textContent = okLabel || "Đồng ý";
+  modalOkFn = onOk;
+  $("modal").classList.remove("hidden");
+  const first = $("modalBody").querySelector("input");
+  if (first) setTimeout(() => first.focus(), 50);
+}
+function closeModal() { $("modal").classList.add("hidden"); modalOkFn = null; }
 
 /* ---------------- records ---------------- */
 function addRecord(content, format) {
+  if (!state.me) { toast("Bạn cần đăng nhập để quét.", "err"); return; }
   content = String(content || "").trim();
   if (!content) { toast("Mã quét rỗng, bỏ qua.", "warn"); return; }
 
   const now = Date.now();
-  if (content === state.lastContent && now - state.lastAt < DUP_COOLDOWN_MS) return; // chống quét dính 2 lần
+  if (content === state.lastContent && now - state.lastAt < DUP_COOLDOWN_MS) return; // chống camera quét dính 2 lần
   state.lastContent = content; state.lastAt = now;
 
-  const isDup = state.records.some((r) => r.content === content);
+  const box = $("lastscan");
+  box.classList.remove("show"); void box.offsetWidth;
+
+  const dup = state.records.find((r) => norm(r.content) === norm(content));
+  if (dup) {
+    // Mã trùng: KHÔNG ghi nhận, chỉ cảnh báo
+    state.dupSkipped = (state.dupSkipped || 0) + 1;
+    saveStore(); renderStats();
+    box.classList.add("dup");
+    box.innerHTML = "⚠️ <b>Đã được quét</b> — mã này đã ghi nhận trước đó nên bỏ qua.<br>" +
+      "<code>" + esc(content) + "</code><br><span class='muted'>Ghi nhận lần đầu: " + fmtTime(dup.scannedAt) + "</span>";
+    box.classList.add("show");
+    beepDup();
+    toast("Đã được quét — bỏ qua mã trùng.", "warn");
+    return;
+  }
+
   const rec = {
     id: uid(),
     content,
@@ -102,45 +248,56 @@ function addRecord(content, format) {
     scannedAt: new Date().toISOString(),
     session: state.settings.session.trim(),
     note: state.settings.note.trim(),
-    dup: isDup,
+    userId: state.me.id,
+    username: state.me.username,
   };
   state.records.unshift(rec);
   state.page = 0;
   saveStore(); renderAll();
 
-  const box = $("lastscan");
-  box.classList.toggle("dup", isDup);
-  box.classList.remove("show"); void box.offsetWidth;
-  box.innerHTML = (isDup ? "⚠️ <b>Mã trùng</b> — đã quét trước đó.<br>" : "✅ <b>Đã ghi nhận:</b><br>") +
+  box.classList.remove("dup");
+  box.innerHTML = "✅ <b>Đã ghi nhận:</b><br>" +
     "<code>" + esc(content) + "</code><br><span class='muted'>" + esc(rec.format) + " · " + fmtTime(rec.scannedAt) + "</span>";
   box.classList.add("show");
-
-  if (isDup && state.settings.warnDuplicate) { beep(false); toast("Mã này đã được quét trước đó.", "warn"); }
-  else { beep(true); toast(isDup ? "Đã ghi nhận (mã trùng)." : "Đã ghi nhận mã mới.", isDup ? "warn" : "ok"); }
+  beep(true);
+  toast("Đã ghi nhận mã mới.", "ok");
 }
 
 function deleteRecord(id) {
+  const rec = state.records.find((r) => r.id === id);
+  if (!rec) return;
+  if (!isAdmin() && rec.userId !== state.me.id) { toast("Bạn chỉ được xóa bản ghi của mình.", "err"); return; }
   state.records = state.records.filter((r) => r.id !== id);
   saveStore(); renderAll();
   toast("Đã xóa bản ghi.", "ok");
 }
 function clearAll() {
-  if (!state.records.length) return;
-  if (!confirm("Xóa toàn bộ " + state.records.length + " bản ghi? Hành động này không thể hoàn tác.")) return;
-  state.records = []; state.page = 0;
-  saveStore(); renderAll();
-  toast("Đã xóa toàn bộ dữ liệu.", "ok");
+  const mine = visibleRecords();
+  if (!mine.length) return;
+  const label = isAdmin() ? "toàn bộ " + state.records.length + " bản ghi của mọi tài khoản"
+                          : mine.length + " bản ghi của bạn";
+  openModal("Xóa dữ liệu", "<p>Xóa " + esc(label) + "? Hành động này không thể hoàn tác.</p>", "Xóa", () => {
+    state.records = isAdmin() ? [] : state.records.filter((r) => r.userId !== state.me.id);
+    state.page = 0;
+    saveStore(); renderAll(); closeModal();
+    toast("Đã xóa dữ liệu.", "ok");
+  });
 }
 
 /* ---------------- filter / render ---------------- */
+function visibleRecords() {
+  if (!state.me) return [];
+  if (isAdmin()) return state.records;
+  return state.records.filter((r) => r.userId === state.me.id);
+}
 function filteredRecords() {
   const q = state.filterText.trim().toLowerCase();
-  return state.records.filter((r) => {
+  return visibleRecords().filter((r) => {
     if (q && !(r.content.toLowerCase().includes(q) ||
                (r.note || "").toLowerCase().includes(q) ||
-               (r.session || "").toLowerCase().includes(q))) return false;
-    if (state.filterDate && !String(r.scannedAt).startsWith(state.filterDate)) {
-      // so sánh theo giờ VN
+               (r.session || "").toLowerCase().includes(q) ||
+               (r.username || "").toLowerCase().includes(q))) return false;
+    if (state.filterDate) {
       const d = new Date(r.scannedAt).toLocaleDateString("en-CA", { timeZone: TZ });
       if (d !== state.filterDate) return false;
     }
@@ -149,17 +306,21 @@ function filteredRecords() {
 }
 
 function stats() {
-  const total = state.records.length;
+  const list = visibleRecords();
   const t = todayStr();
-  const today = state.records.filter((r) =>
+  const today = list.filter((r) =>
     new Date(r.scannedAt).toLocaleDateString("en-CA", { timeZone: TZ }) === t).length;
-  const uniq = new Set(state.records.map((r) => r.content)).size;
-  return { total, today, uniq, dup: total - uniq };
+  const uniq = new Set(list.map((r) => norm(r.content))).size;
+  return { total: list.length, today, uniq, dup: state.dupSkipped || 0 };
 }
 
 function renderAll() {
+  // nếu tài khoản bị xóa khi đang đăng nhập -> đăng xuất
+  state.me = currentUser();
+  if (!state.me) { doLogout(); return; }
   renderStats(); renderTable();
-  $("btnExportCsv").disabled = $("btnExportJson").disabled = $("btnClear").disabled = !state.records.length;
+  const n = visibleRecords().length;
+  $("btnExportCsv").disabled = $("btnExportJson").disabled = $("btnClear").disabled = !n;
 }
 
 function renderStats() {
@@ -170,27 +331,35 @@ function renderStats() {
   $("kpiDup").textContent = s.dup.toLocaleString("vi-VN");
 }
 
+function renderHead() {
+  const admin = isAdmin();
+  $("theadRow").innerHTML = "<tr><th>#</th><th>Nội dung mã</th><th>Định dạng</th><th>Thời gian quét</th>" +
+    "<th>Phiên / Ghi chú</th>" + (admin ? "<th>Người quét</th>" : "") + "<th></th></tr>";
+}
+
 function renderTable() {
+  const admin = isAdmin();
   const list = filteredRecords();
   const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
   state.page = Math.min(state.page, pages - 1);
   const slice = list.slice(state.page * PAGE_SIZE, state.page * PAGE_SIZE + PAGE_SIZE);
+  const cols = admin ? 7 : 6;
 
   const body = $("tbody");
   if (!slice.length) {
-    body.innerHTML = '<tr><td colspan="6"><div class="empty">' +
-      (state.records.length ? "Không tìm thấy bản ghi phù hợp bộ lọc." : "Chưa có bản ghi nào. Hãy quét mã đầu tiên 📷") +
+    body.innerHTML = '<tr><td colspan="' + cols + '"><div class="empty">' +
+      (visibleRecords().length ? "Không tìm thấy bản ghi phù hợp bộ lọc." : "Chưa có bản ghi nào. Hãy quét mã đầu tiên 📷") +
       "</div></td></tr>";
   } else {
     body.innerHTML = slice.map((r, i) => {
       const n = state.page * PAGE_SIZE + i + 1;
       return "<tr>" +
         "<td class='muted'>" + n + "</td>" +
-        "<td class='content'><code style='font-size:12px'>" + esc(r.content) + "</code><br>" +
-          "<span class='badge " + (r.dup ? "dup'>trùng" : "new'>mới") + "</span></td>" +
+        "<td class='content'><code style='font-size:12px'>" + esc(r.content) + "</code></td>" +
         "<td class='muted'>" + esc(r.format || "") + "</td>" +
         "<td class='muted' style='white-space:nowrap'>" + fmtTime(r.scannedAt) + "</td>" +
         "<td>" + esc(r.session || "") + (r.note ? "<br><span class='muted'>" + esc(r.note) + "</span>" : "") + "</td>" +
+        (admin ? "<td><b>" + esc(r.username || "—") + "</b></td>" : "") +
         "<td><button class='small danger' data-del='" + r.id + "'>Xóa</button></td>" +
         "</tr>";
     }).join("");
@@ -198,9 +367,121 @@ function renderTable() {
   body.querySelectorAll("[data-del]").forEach((b) =>
     b.addEventListener("click", () => deleteRecord(b.getAttribute("data-del"))));
 
+  $("recCount").textContent = list.length;
   $("pageInfo").textContent = "Trang " + (state.page + 1) + "/" + pages + " · " + list.length + " bản ghi";
   $("btnPrev").disabled = state.page <= 0;
   $("btnNext").disabled = state.page >= pages - 1;
+}
+
+/* ---------------- quản lý tài khoản (admin) ---------------- */
+function renderUsers() {
+  if (!isAdmin()) return;
+  const users = getUsers();
+  const counts = {};
+  state.records.forEach((r) => { if (r.userId) counts[r.userId] = (counts[r.userId] || 0) + 1; });
+  $("usersBody").innerHTML = users.map((u) =>
+    "<tr><td><b>" + esc(u.username) + "</b>" +
+      (state.me && u.id === state.me.id ? " <span class='badge new'>bạn</span>" : "") + "</td>" +
+    "<td>" + (u.role === "admin" ? "<span class='role admin'>Quản trị</span>" : "<span class='role user'>Nhân viên</span>") + "</td>" +
+    "<td class='muted'>" + fmtTime(u.createdAt) + "</td>" +
+    "<td class='muted'>" + (counts[u.id] || 0) + "</td>" +
+    "<td style='white-space:nowrap'><button class='small' data-pw='" + u.id + "'>Đổi MK</button> " +
+    "<button class='small danger' data-deluser='" + u.id + "'>Xóa</button></td></tr>"
+  ).join("");
+  $("usersBody").querySelectorAll("[data-pw]").forEach((b) =>
+    b.addEventListener("click", () => adminResetPw(b.getAttribute("data-pw"))));
+  $("usersBody").querySelectorAll("[data-deluser]").forEach((b) =>
+    b.addEventListener("click", () => adminDeleteUser(b.getAttribute("data-deluser"))));
+}
+
+async function adminAddUser() {
+  const name = $("newUserName").value.trim();
+  let pass = $("newUserPass").value;
+  const role = $("newUserRole").value === "admin" ? "admin" : "user";
+  if (name.length < 3) { toast("Tên đăng nhập phải từ 3 ký tự trở lên.", "warn"); return; }
+  if (!/^[a-zA-Z0-9_.-]+$/.test(name)) { toast("Tên đăng nhập chỉ gồm chữ, số, dấu . _ -", "warn"); return; }
+  if (findUserByName(name)) { toast("Tên đăng nhập đã tồn tại.", "err"); return; }
+  if (!pass) pass = "123456";
+  if (pass.length < 4) { toast("Mật khẩu phải từ 4 ký tự trở lên.", "warn"); return; }
+  const salt = makeSalt();
+  const users = getUsers();
+  users.push({ id: uid(), username: name, salt, passHash: await pwHash(pass, salt), role, createdAt: new Date().toISOString() });
+  saveUsers(users);
+  $("newUserName").value = ""; $("newUserPass").value = "";
+  renderUsers();
+  toast("Đã thêm tài khoản " + name + ".", "ok");
+}
+
+function adminResetPw(userId) {
+  const users = getUsers();
+  const u = users.find((x) => x.id === userId);
+  if (!u) return;
+  openModal("Đặt lại mật khẩu",
+    "<p>Đặt mật khẩu mới cho tài khoản <b>" + esc(u.username) + "</b>:</p>" +
+    "<div class='field'><label for='mNewPass'>Mật khẩu mới</label>" +
+    "<input type='password' id='mNewPass' placeholder='Tối thiểu 4 ký tự'></div>",
+    "Lưu mật khẩu", async () => {
+      const p = $("mNewPass").value;
+      if (p.length < 4) { toast("Mật khẩu phải từ 4 ký tự trở lên.", "warn"); return; }
+      const salt = makeSalt();
+      u.salt = salt; u.passHash = await pwHash(p, salt);
+      saveUsers(users); closeModal(); renderUsers();
+      toast("Đã đổi mật khẩu cho " + u.username + ".", "ok");
+    });
+}
+
+function adminDeleteUser(userId) {
+  const users = getUsers();
+  const u = users.find((x) => x.id === userId);
+  if (!u) return;
+  if (u.id === state.me.id) { toast("Không thể xóa chính tài khoản đang đăng nhập.", "err"); return; }
+  if (u.role === "admin" && users.filter((x) => x.role === "admin").length <= 1) {
+    toast("Không thể xóa quản trị viên cuối cùng.", "err"); return;
+  }
+  const n = state.records.filter((r) => r.userId === u.id).length;
+  openModal("Xóa tài khoản",
+    "<p>Xóa tài khoản <b>" + esc(u.username) + "</b>?" +
+    (n ? " (" + n + " bản ghi của tài khoản này sẽ được giữ lại cho admin xem.)" : "") + "</p>",
+    "Xóa tài khoản", () => {
+      saveUsers(users.filter((x) => x.id !== userId));
+      closeModal(); renderUsers();
+      toast("Đã xóa tài khoản " + u.username + ".", "ok");
+    });
+}
+
+/* ---------------- tài khoản của tôi ---------------- */
+async function changeMyName() {
+  const name = $("chgName").value.trim();
+  if (name.length < 3) { toast("Tên đăng nhập phải từ 3 ký tự trở lên.", "warn"); return; }
+  if (!/^[a-zA-Z0-9_.-]+$/.test(name)) { toast("Tên đăng nhập chỉ gồm chữ, số, dấu . _ -", "warn"); return; }
+  const other = findUserByName(name);
+  if (other && other.id !== state.me.id) { toast("Tên đăng nhập đã tồn tại.", "err"); return; }
+  const users = getUsers();
+  const u = users.find((x) => x.id === state.me.id);
+  if (!u) return;
+  u.username = name;
+  saveUsers(users);
+  state.me = currentUser();
+  $("chipName").textContent = state.me.username;
+  // cập nhật tên hiển thị trên các bản ghi của mình
+  state.records.forEach((r) => { if (r.userId === u.id) r.username = name; });
+  saveStore(); renderTable();
+  toast("Đã đổi tên đăng nhập thành " + name + ".", "ok");
+}
+
+async function changeMyPassword() {
+  const oldP = $("oldPass").value, p1 = $("newPass").value, p2 = $("newPass2").value;
+  const users = getUsers();
+  const u = users.find((x) => x.id === state.me.id);
+  if (!u) return;
+  if ((await pwHash(oldP, u.salt)) !== u.passHash) { toast("Mật khẩu hiện tại không đúng.", "err"); return; }
+  if (p1.length < 4) { toast("Mật khẩu mới phải từ 4 ký tự trở lên.", "warn"); return; }
+  if (p1 !== p2) { toast("Nhập lại mật khẩu mới chưa khớp.", "warn"); return; }
+  const salt = makeSalt();
+  u.salt = salt; u.passHash = await pwHash(p1, salt);
+  saveUsers(users);
+  $("oldPass").value = $("newPass").value = $("newPass2").value = "";
+  toast("Đã đổi mật khẩu.", "ok");
 }
 
 /* ---------------- export ---------------- */
@@ -212,19 +493,21 @@ function download(name, content, type) {
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
 }
 function exportCSV() {
-  const head = ["STT", "Noi dung ma", "Dinh dang", "Thoi gian quet (GMT+7)", "Phien", "Ghi chu", "Trung lap"];
+  const list = filteredRecords();
+  const head = ["STT", "Noi dung ma", "Dinh dang", "Thoi gian quet (GMT+7)", "Phien", "Ghi chu", "Nguoi quet"];
   const q = (v) => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
   const lines = [head.map(q).join(",")];
-  state.records.forEach((r, i) => lines.push(
-    [i + 1, r.content, r.format, fmtTime(r.scannedAt), r.session, r.note, r.dup ? "Co" : ""].map(q).join(",")));
+  list.forEach((r, i) => lines.push(
+    [i + 1, r.content, r.format, fmtTime(r.scannedAt), r.session, r.note, r.username].map(q).join(",")));
   download("quetdoc_qrcode_" + todayStr() + ".csv", "﻿" + lines.join("\r\n"), "text/csv;charset=utf-8");
-  toast("Đã xuất file CSV.", "ok");
+  toast("Đã xuất file CSV (" + list.length + " bản ghi).", "ok");
 }
 function exportJSON() {
+  const list = filteredRecords();
   download("quetdoc_qrcode_" + todayStr() + ".json",
-    JSON.stringify({ exportedAt: new Date().toISOString(), records: state.records }, null, 2),
+    JSON.stringify({ exportedAt: new Date().toISOString(), exportedBy: state.me.username, records: list }, null, 2),
     "application/json");
-  toast("Đã xuất file JSON.", "ok");
+  toast("Đã xuất file JSON (" + list.length + " bản ghi).", "ok");
 }
 
 /* ---------------- scanner ---------------- */
@@ -240,9 +523,8 @@ function setHttpsChip() {
 }
 
 async function listCameras() {
-  try {
-    state.cameras = await Html5Qrcode.getCameras();
-  } catch (e) { state.cameras = []; }
+  try { state.cameras = await Html5Qrcode.getCameras(); }
+  catch (e) { state.cameras = []; }
   const sel = $("cameraSelect");
   sel.innerHTML = "";
   if (!state.cameras.length) {
@@ -295,9 +577,12 @@ async function stopScan() {
   try { await html5Qr.stop(); } catch (e) {}
   try { html5Qr.clear(); } catch (e) {}
   state.scanning = false; state.torchOn = false;
-  $("btnStart").disabled = false; $("btnStop").disabled = true;
-  $("cameraSelect").disabled = false; $("btnTorch").classList.add("hidden");
-  $("reader").innerHTML = '<div class="reader-idle">📷<br>Nhấn <b>Bắt đầu quét</b> để mở camera</div>';
+  const bs = $("btnStart"), bt = $("btnStop"), cs = $("cameraSelect");
+  if (bs) { bs.disabled = false; bt.disabled = true; cs.disabled = false; }
+  const tb = $("btnTorch");
+  if (tb) tb.classList.add("hidden");
+  const rd = $("reader");
+  if (rd) rd.innerHTML = '<div class="reader-idle">📷<br>Nhấn <b>Bắt đầu quét</b> để mở camera</div>';
   setCamStatus("⚪ Camera đang tắt", "");
 }
 function updateTorchBtn() {
@@ -332,6 +617,11 @@ function scanFromFile(file) {
 
 /* ---------------- events ---------------- */
 function bindEvents() {
+  $("btnLogin").addEventListener("click", doLogin);
+  [$("loginUser"), $("loginPass")].forEach((el) =>
+    el.addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); }));
+  $("btnLogout").addEventListener("click", doLogout);
+
   $("btnStart").addEventListener("click", startScan);
   $("btnStop").addEventListener("click", stopScan);
   $("btnTorch").addEventListener("click", toggleTorch);
@@ -350,7 +640,6 @@ function bindEvents() {
 
   $("sessionInput").addEventListener("input", (e) => { state.settings.session = e.target.value; saveStore(); });
   $("noteInput").addEventListener("input", (e) => { state.settings.note = e.target.value; saveStore(); });
-  $("chkWarnDup").addEventListener("change", (e) => { state.settings.warnDuplicate = e.target.checked; saveStore(); });
   $("chkSound").addEventListener("change", (e) => { state.settings.sound = e.target.checked; saveStore(); });
 
   $("searchInput").addEventListener("input", (e) => { state.filterText = e.target.value; state.page = 0; renderTable(); });
@@ -367,21 +656,29 @@ function bindEvents() {
   $("btnExportJson").addEventListener("click", exportJSON);
   $("btnClear").addEventListener("click", clearAll);
 
+  $("btnAddUser").addEventListener("click", adminAddUser);
+  $("btnChgName").addEventListener("click", changeMyName);
+  $("btnChgPass").addEventListener("click", changeMyPassword);
+
+  $("modalCancel").addEventListener("click", closeModal);
+  $("modalOk").addEventListener("click", () => { if (modalOkFn) modalOkFn(); });
+  $("modal").addEventListener("click", (e) => { if (e.target === $("modal")) closeModal(); });
+
   window.addEventListener("beforeunload", () => { if (state.scanning) stopScan(); });
 }
 
 /* ---------------- init ---------------- */
-function init() {
+async function init() {
+  await seedUsers();
   loadStore();
   $("sessionInput").value = state.settings.session || "";
   $("noteInput").value = state.settings.note || "";
-  $("chkWarnDup").checked = state.settings.warnDuplicate !== false;
   $("chkSound").checked = state.settings.sound !== false;
-  $("recCount").textContent = state.records.length;
   setHttpsChip();
   setCamStatus("⚪ Camera đang tắt", "");
   bindEvents();
-  renderAll();
+  if (currentUser()) enterApp();
+  else { $("viewLogin").classList.remove("hidden"); }
   listCameras();
   if (!("mediaDevices" in navigator)) {
     toast("Trình duyệt không hỗ trợ camera. Bạn vẫn có thể nhập tay hoặc quét từ ảnh.", "warn");

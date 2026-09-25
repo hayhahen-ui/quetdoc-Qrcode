@@ -2,6 +2,26 @@
 
 Ngày: 24/09/2026 · Người audit: Muse (AI assistant)
 
+## 0. Bản v2 (25/09/2026) — Đăng nhập phân quyền + chống trùng tuyệt đối
+Theo phản hồi thực tế sau khi chạy trên điện thoại (bảng dữ liệu vẫn lưu nhiều mã
+trùng dù đã có cảnh báo), bản v2 thay đổi:
+
+1. **Quét trùng → bỏ qua, không ghi nhận.** Mỗi mã chỉ lưu đúng 1 lần duy nhất
+   (so sánh không phân biệt hoa/thường, trim khoảng trắng). Quét lại chỉ hiện
+   cảnh báo "⚠️ Đã được quét" + thời gian ghi nhận lần đầu + đếm vào KPI
+   "Bỏ qua trùng". Xóa bỏ khái niệm bản ghi "trùng" trong bảng.
+2. **Đăng nhập phân quyền (client-side):**
+   - `admin / admin`: xem toàn bộ bản ghi (cột "Người quét"), quản lý tài khoản
+     (xem / thêm / xóa / đặt lại mật khẩu), xóa toàn bộ dữ liệu.
+   - `user1`…`user5 / 123456`: chỉ quét, chỉ xem bản ghi của chính mình,
+     đổi tên đăng nhập, đổi mật khẩu, xóa bản ghi của mình.
+   - Mật khẩu băm SHA-256 + salt từng tài khoản, không lưu plaintext.
+   - **Lưu ý trung thực:** auth chạy hoàn toàn phía trình duyệt (localStorage)
+     nên chỉ là "phân quyền vận hành", không chống được người cố tình mở
+     DevTools đọc dữ liệu. Muốn bảo mật thật → cần backend (Supabase Auth).
+3. **Sửa bug:** số lượng `#recCount` trong tiêu đề bảng giờ cập nhật đúng sau
+   mỗi lần render (bản v1 chỉ set 1 lần lúc tải trang nên luôn hiện 0).
+
 ## 1. Đã đọc toàn bộ file nén — cấu trúc hiểu được
 
 ```
