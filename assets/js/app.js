@@ -35,6 +35,15 @@ let html5Qr = null;
 const $ = (id) => document.getElementById(id);
 const norm = (s) => String(s == null ? "" : s).trim().toUpperCase();
 
+/* LocalStorage an toàn: một số trình duyệt (máy công ty, chế độ chặn site data)
+ * ném lỗi khi chạm vào localStorage. Bọc lại để app KHÔNG BAO GIỜ chết với trang đen. */
+let storageOK = true;
+const safeLS = {
+  get(k) { try { return window.localStorage.getItem(k); } catch (e) { storageOK = false; return null; } },
+  set(k, v) { try { window.localStorage.setItem(k, v); } catch (e) { storageOK = false; } },
+  del(k) { try { window.localStorage.removeItem(k); } catch (e) { storageOK = false; } },
+};
+
 function fmtTime(iso) {
   try { return new Date(iso).toLocaleString("vi-VN", { timeZone: TZ, hour12: false }); }
   catch (e) { return iso; }
@@ -77,7 +86,7 @@ function beepDup() { beep(false); setTimeout(() => beep(false), 200); }
 /* ---------------- storage: bản ghi ---------------- */
 function loadStore() {
   try {
-    const raw = localStorage.getItem(STORE_KEY);
+    const raw = safeLS.get(STORE_KEY);
     if (!raw) return;
     const data = JSON.parse(raw);
     if (Array.isArray(data.records)) state.records = data.records;
@@ -89,7 +98,7 @@ function loadStore() {
 }
 function saveStore() {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify({
+    safeLS.set(STORE_KEY, JSON.stringify({
       records: state.records, dupSkipped: state.dupSkipped, settings: state.settings, v: 2,
     }));
   } catch (e) { toast("Bộ nhớ trình duyệt đầy, không lưu được bản ghi mới.", "err"); }
@@ -124,16 +133,16 @@ const pwHash = (pw, salt) => sha256Hex(salt + "::" + pw);
 
 /* ---------------- auth: users & session ---------------- */
 function getUsers() {
-  try { const u = JSON.parse(localStorage.getItem(USERS_KEY)); return Array.isArray(u) ? u : []; }
+  try { const u = JSON.parse(safeLS.get(USERS_KEY)); return Array.isArray(u) ? u : []; }
   catch (e) { return []; }
 }
-function saveUsers(u) { localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
+function saveUsers(u) { safeLS.set(USERS_KEY, JSON.stringify(u)); }
 function findUserByName(name) {
   const n = String(name || "").trim().toLowerCase();
   return getUsers().find((u) => u.username.toLowerCase() === n) || null;
 }
 async function seedUsers() {
-  if (localStorage.getItem(USERS_KEY) != null) return;
+  if (safeLS.get(USERS_KEY) != null) return;
   const users = [];
   const add = async (username, password, role) => {
     const salt = makeSalt();
@@ -144,11 +153,11 @@ async function seedUsers() {
   saveUsers(users);
 }
 function getSession() {
-  try { return JSON.parse(localStorage.getItem(SESSION_KEY)); } catch (e) { return null; }
+  try { return JSON.parse(safeLS.get(SESSION_KEY)); } catch (e) { return null; }
 }
 function setSession(s) {
-  if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
-  else localStorage.removeItem(SESSION_KEY);
+  if (s) safeLS.set(SESSION_KEY, JSON.stringify(s));
+  else safeLS.del(SESSION_KEY);
 }
 function currentUser() {
   const s = getSession();
@@ -168,6 +177,10 @@ async function doLogin() {
   const h = await pwHash(pass, user.salt);
   if (h !== user.passHash) { err.textContent = "Sai tên đăng nhập hoặc mật khẩu."; return; }
   setSession({ userId: user.id, ts: Date.now() });
+  if (!getSession()) {
+    err.textContent = "Trình duyệt đang chặn lưu trữ (localStorage) nên không giữ được đăng nhập. Hãy cho phép site data cho trang này rồi tải lại.";
+    return;
+  }
   $("loginPass").value = "";
   toast("Xin chào, " + user.username + "!", "ok");
   enterApp();
@@ -669,19 +682,49 @@ function bindEvents() {
 
 /* ---------------- init ---------------- */
 async function init() {
-  await seedUsers();
-  loadStore();
-  $("sessionInput").value = state.settings.session || "";
-  $("noteInput").value = state.settings.note || "";
-  $("chkSound").checked = state.settings.sound !== false;
-  setHttpsChip();
-  setCamStatus("⚪ Camera đang tắt", "");
-  bindEvents();
-  if (currentUser()) enterApp();
-  else { $("viewLogin").classList.remove("hidden"); }
-  listCameras();
-  if (!("mediaDevices" in navigator)) {
-    toast("Trình duyệt không hỗ trợ camera. Bạn vẫn có thể nhập tay hoặc quét từ ảnh.", "warn");
+  // CHỐNG TRANG ĐEN: hiện màn hình đăng nhập NGAY LẬP TỨC, trước mọi tác vụ
+  // async/storage có thể lỗi. Dù phía sau có sự cố gì, người dùng vẫn thấy giao diện.
+  try {
+    if (!currentUser()) $("viewLogin").classList.remove("hidden");
+  } catch (e) {
+    try { $("viewLogin").classList.remove("hidden"); } catch (e2) {}
+  }
+
+  try {
+    await seedUsers();
+    loadStore();
+    $("sessionInput").value = state.settings.session || "";
+    $("noteInput").value = state.settings.note || "";
+    $("chkSound").checked = state.settings.sound !== false;
+    setHttpsChip();
+    setCamStatus("⚪ Camera đang tắt", "");
+    bindEvents();
+    if (currentUser()) enterApp();
+    // (không có session: màn hình đăng nhập đã hiện sẵn ở trên)
+    listCameras();
+    if (!("mediaDevices" in navigator)) {
+      toast("Trình duyệt không hỗ trợ camera. Bạn vẫn có thể nhập tay hoặc quét từ ảnh.", "warn");
+    }
+    if (!storageOK) {
+      const msg = "Trình duyệt đang chặn lưu trữ cục bộ — dữ liệu quét sẽ KHÔNG được lưu. Hãy cho phép site data/cookie cho trang này rồi tải lại.";
+      toast("⚠️ " + msg, "err");
+      const le = $("loginErr");
+      if (le) le.textContent = msg;
+    }
+  } catch (e) {
+    console.error("Lỗi khởi tạo:", e);
+    try { $("viewLogin").classList.remove("hidden"); } catch (e2) {}
+    const le = $("loginErr");
+    if (le) le.textContent = "Không khởi tạo được ứng dụng: " + (e && e.message ? e.message : e);
   }
 }
+
+// Lưới an toàn cuối cùng: nếu vì lý do gì cả 2 màn hình đều ẩn (trang đen),
+// tự động hiện lại màn hình đăng nhập thay vì để trắng tinh.
+window.addEventListener("error", () => {
+  try {
+    const l = document.getElementById("viewLogin"), a = document.getElementById("viewApp");
+    if (l && a && l.classList.contains("hidden") && a.classList.contains("hidden")) l.classList.remove("hidden");
+  } catch (e) {}
+});
 document.addEventListener("DOMContentLoaded", init);
