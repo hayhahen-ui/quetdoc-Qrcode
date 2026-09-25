@@ -1080,15 +1080,20 @@ function setPacking(rows) {
   state.packingByChi = m;
   state.packingReady = true;
 }
-/* Số thứ tự thùng từ mã QR: tem in số thùng 0-index ("…60000" = thùng đầu tiên),
- * packing list đánh 1-index (1…n) -> CỘNG 1 (đã kiểm chứng khớp báo cáo mẫu cũ:
+/* Đuôi QR sau ký tự "6": SỐ IN TRÊN TEM, bắt đầu từ 000 (0-index).
+ * Packing list đánh từ 1 -> số packing = tail + 1 (đã kiểm chứng khớp báo cáo mẫu cũ:
  * AE2608506 cho đúng 11/22/26/16/12/5, P=92, Q=552). Đuôi lạ -> null. */
-function boxSeq(content, chiThi) {
+function boxTail(content, chiThi) {
   const tail = String(content || "").slice(String(chiThi || "").length);
   const m = /^6(\d+)$/.exec(tail);
   if (!m) return null;
   const n = parseInt(m[1], 10);
-  return Number.isFinite(n) && n >= 0 ? n + 1 : null;
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+/* Số thứ tự thùng theo packing list (1-index) = tail + 1, dùng để tra khoảng. */
+function boxSeq(content, chiThi) {
+  const t = boxTail(content, chiThi);
+  return t == null ? null : t + 1;
 }
 /* Tra khoảng packing chứa thùng vừa quét -> {size, doi_thung, po, ...} | null */
 function packingLookup(chiThi, content) {
@@ -1339,10 +1344,12 @@ function computeReport(dayRows) {
     if (!ranges || !ranges.length) { noPack.push({ chi_thi: ct, count: list.length }); return; }
     ranges.forEach((rg) => {
       let p = 0;
-      const boxSet = new Set();
+      const boxSet = new Set(); // lưu SỐ IN TRÊN TEM (0-index) để hiển thị cột M
       for (const r of list) {
-        const n = boxSeq(r.content, ct);
-        if (n != null && rg.thung_tu <= n && n <= rg.thung_den) { p++; boxSet.add(n); }
+        const t = boxTail(r.content, ct);
+        if (t == null) continue;
+        const n = t + 1; // số packing (1-index) để tra khoảng
+        if (rg.thung_tu <= n && n <= rg.thung_den) { p++; boxSet.add(t); }
       }
       const boxes = [...boxSet].sort((a, b) => a - b);
       rows.push({ rg: rg, p: p, q: p * (rg.doi_thung || 0), left: (rg.so_thung || 0) - p, boxes: boxes });
