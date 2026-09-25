@@ -868,32 +868,36 @@ async function renderUserSummary() {
   const inp = $("sumDate");
   if (inp && !inp.value) inp.value = todayStr();
   const day = inp ? inp.value : todayStr();
-  body.innerHTML = "<tr><td colspan='7' class='muted'>Đang tải số liệu ngày " + esc(day.split("-").reverse().join("/")) + "…</td></tr>";
-  let rows;
-  try { rows = await fetchDayRecords(day); }
-  catch (e) { body.innerHTML = "<tr><td colspan='7' class='muted'>Không tải được: " + esc(e.message || e) + "</td></tr>"; return; }
-  const users = summarizeDay(rows);
-  if (!users.length) {
-    body.innerHTML = "<tr><td colspan='7' class='muted'>Ngày này chưa có bản ghi nào.</td></tr>";
-    return;
+  const dayLabel = esc(day.split("-").reverse().join("/"));
+  body.innerHTML = "<tr><td colspan='7' class='muted'>Đang tải số liệu ngày " + dayLabel + "…</td></tr>";
+  try { // v6.7.1: mọi lỗi đều hiện rõ + bấm ↻ thử lại, không bao giờ kẹt ở "Đang tải"
+    const rows = await fetchDayRecords(day);
+    const users = summarizeDay(rows);
+    if (!users.length) {
+      body.innerHTML = "<tr><td colspan='7' class='muted'>Ngày này chưa có bản ghi nào.</td></tr>";
+      return;
+    }
+    const tot = { "kiểm": { boxes: 0, pairs: 0 }, "nhập": { boxes: 0, pairs: 0 }, "xuất": { boxes: 0, pairs: 0 }, boxes: 0, pairs: 0, pallets: new Set() };
+    const html = users.map((g) => {
+      ["kiểm", "nhập", "xuất"].forEach((t) => { tot[t].boxes += g.types[t].boxes; tot[t].pairs += g.types[t].pairs; });
+      tot.boxes += g.boxes; tot.pairs += g.pairs;
+      g.pallets.forEach((p) => tot.pallets.add(g.user + "‖" + p));
+      return "<tr><td><b>" + esc(dName(g.user)) + "</b></td>" +
+        "<td>" + sumCell(g.types["kiểm"]) + "</td>" +
+        "<td>" + sumCell(g.types["nhập"]) + "</td>" +
+        "<td>" + sumCell(g.types["xuất"]) + "</td>" +
+        "<td><b>" + num(g.pallets.size) + "</b></td>" +
+        "<td><b>" + num(g.boxes) + "</b></td>" +
+        "<td><b>" + num(g.pairs) + "</b></td></tr>";
+    }).join("");
+    body.innerHTML = html +
+      "<tr class='sum-total'><td><b>TỔNG CỘNG</b></td>" +
+      "<td>" + sumCell(tot["kiểm"]) + "</td><td>" + sumCell(tot["nhập"]) + "</td><td>" + sumCell(tot["xuất"]) + "</td>" +
+      "<td><b>" + num(tot.pallets.size) + "</b></td><td><b>" + num(tot.boxes) + "</b></td><td><b>" + num(tot.pairs) + "</b></td></tr>";
+  } catch (e) {
+    body.innerHTML = "<tr><td colspan='7'>⚠ Không tải được số liệu ngày " + dayLabel + ": " +
+      esc((e && e.message) || e) + "<br><span class='muted'>Bấm nút ↻ phía trên để thử lại.</span></td></tr>";
   }
-  const tot = { "kiểm": { boxes: 0, pairs: 0 }, "nhập": { boxes: 0, pairs: 0 }, "xuất": { boxes: 0, pairs: 0 }, boxes: 0, pairs: 0, pallets: new Set() };
-  const html = users.map((g) => {
-    ["kiểm", "nhập", "xuất"].forEach((t) => { tot[t].boxes += g.types[t].boxes; tot[t].pairs += g.types[t].pairs; });
-    tot.boxes += g.boxes; tot.pairs += g.pairs;
-    g.pallets.forEach((p) => tot.pallets.add(g.user + "‖" + p));
-    return "<tr><td><b>" + esc(dName(g.user)) + "</b></td>" +
-      "<td>" + sumCell(g.types["kiểm"]) + "</td>" +
-      "<td>" + sumCell(g.types["nhập"]) + "</td>" +
-      "<td>" + sumCell(g.types["xuất"]) + "</td>" +
-      "<td><b>" + num(g.pallets.size) + "</b></td>" +
-      "<td><b>" + num(g.boxes) + "</b></td>" +
-      "<td><b>" + num(g.pairs) + "</b></td></tr>";
-  }).join("");
-  body.innerHTML = html +
-    "<tr class='sum-total'><td><b>TỔNG CỘNG</b></td>" +
-    "<td>" + sumCell(tot["kiểm"]) + "</td><td>" + sumCell(tot["nhập"]) + "</td><td>" + sumCell(tot["xuất"]) + "</td>" +
-    "<td><b>" + num(tot.pallets.size) + "</b></td><td><b>" + num(tot.boxes) + "</b></td><td><b>" + num(tot.pairs) + "</b></td></tr>";
 }
 function shiftSumDate(d) {
   const inp = $("sumDate");
@@ -1773,17 +1777,38 @@ function openReportModal() {
 }
 /* Lấy toàn bộ bản ghi của 1 ngày (giờ VN) trực tiếp từ server —
  * không phụ thuộc giới hạn 500 dòng đang hiển thị trên bảng. */
+/* v6.7.1: bọc timeout cho promise — Supabase JS không có timeout mặc định,
+ * request kẹt (mạng công ty/proxy) sẽ treo await vĩnh viễn. */
+function withTimeout(promise, ms, label) {
+  let t;
+  const timeout = new Promise((_, rej) => {
+    t = setTimeout(() => rej(new Error("Hết thời gian chờ " + label + " (" + Math.round(ms / 1000) + "s). Hãy bấm ↻ thử lại.")), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
+}
 async function fetchDayRecords(day) {
   const t0 = new Date(day + "T00:00:00+07:00");
   const t1 = new Date(t0); t1.setDate(t1.getDate() + 1);
-  const cols = schemaV4 ? "content,chi_thi,session,scanned_at,username,size" : "content,session,scanned_at,username"; // v6.7: thêm size để tính tổng số đôi
+  const full = "content,chi_thi,session,scanned_at,username,size"; // v6.7
+  const legacy = "content,session,scanned_at,username";
+  // v6.7.1: thử cột đầy đủ trước; server báo thiếu cột -> lùi về legacy (như loadRecords)
+  for (const cols of schemaV4 ? [full, legacy] : [legacy]) {
+    try {
+      return await fetchDayPage(t0, t1, cols);
+    } catch (e) {
+      if (schemaV4 && cols === full && /chi_thi|size|schema cache|column/i.test(e.message || "")) continue;
+      throw e;
+    }
+  }
+}
+async function fetchDayPage(t0, t1, cols) {
   let all = [], from = 0;
   for (;;) {
     let q = supa.from("records").select(cols)
       .gte("scanned_at", t0.toISOString()).lt("scanned_at", t1.toISOString())
       .order("scanned_at").range(from, from + 999);
     if (!isAdmin()) q = q.eq("user_id", state.me.id);
-    const { data, error } = await q;
+    const { data, error } = await withTimeout(q, 20000, "tải số liệu ngày");
     if (error) throw error;
     all = all.concat(data || []);
     if (!data || data.length < 1000) break;

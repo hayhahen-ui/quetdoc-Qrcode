@@ -254,4 +254,6 @@ td.editable:hover{background:rgba(245,158,11,.14)}
 
 /* ============ v6.7: tổng hợp theo nhân viên ============ */
 .sumbar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:14px 0 8px}
+.sumbar .toolbar{margin:0;flex-wrap:nowrap}
+@media (max-width:560px){.sumbar .toolbar{width:100%}.sumbar .toolbar #sumDate{flex:1;min-width:0}}
 #sumBody tr.sum-total td{background:rgba(16,185,129,.09);border-top:2px solid var(--emerald)}
