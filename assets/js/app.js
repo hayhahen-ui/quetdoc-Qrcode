@@ -1036,12 +1036,20 @@ async function loadPacking() {
   state.packing = []; state.packingByChi = new Map(); state.packingReady = false;
   if (!supa) return;
   try {
-    const { data, error } = await supa.from("packing_ranges")
-      .select("chi_thi,size,doi_thung,so_thung,tong_doi,thung_tu,thung_den,po,art")
-      .order("chi_thi").order("thung_tu");
-    if (error) throw error;
-    setPacking(data || []);
-    safeLS.set(PACK_CACHE_KEY, JSON.stringify({ at: Date.now(), rows: data || [] }));
+    // v5.0: phân trang .range() vì Supabase mặc định giới hạn 1000 dòng/lần
+    const all = [];
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supa.from("packing_ranges")
+        .select("chi_thi,size,doi_thung,so_thung,tong_doi,thung_tu,thung_den,po,art")
+        .order("chi_thi").order("thung_tu")
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      all.push(...(data || []));
+      if (!data || data.length < PAGE) break;
+    }
+    setPacking(all);
+    try { safeLS.set(PACK_CACHE_KEY, JSON.stringify({ at: Date.now(), rows: all })); } catch (_) {}
   } catch (e) {
     console.warn("Không tải được packing list:", e.message);
     try { // rớt mạng -> dùng cache cũ để vẫn tra được khi quét
