@@ -343,6 +343,101 @@ async function loadRecords() {
   }
 }
 
+/* ---------------- v4.6: OCR tự đọc size từ tem ----------------
+ * QR tem thùng chỉ chứa số thùng (không có size), và audit 239 dòng thật
+ * chứng minh size không suy ra được từ số thùng. Nhưng dòng "UK 5.0-6" in
+ * rõ trên tem -> sau mỗi lần quét camera, chụp khung hình và OCR vùng trên
+ * của tem để tự điền size. Chỉ điền khi size còn trống (không ghi đè pad
+ * do người dùng chọn). Chạy nền, không chặn lần quét tiếp theo. */
+let ocrWorkerP = null;
+const ocrPending = {}; // content -> "5.0-6" (kết quả OCR đang chờ vá vào bản ghi)
+
+function loadTessScript() {
+  return new Promise((res, rej) => {
+    if (window.Tesseract) return res();
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+    s.onload = () => res();
+    s.onerror = () => rej(new Error("load"));
+    document.head.appendChild(s);
+  });
+}
+
+async function ensureOCR() {
+  if (state.settings.ocr === false) return null;
+  try {
+    if (!ocrWorkerP) {
+      ocrWorkerP = (async () => {
+        await loadTessScript();
+        const w = await Tesseract.createWorker("eng");
+        await w.setParameters({
+          tessedit_char_whitelist: "UKuk0123456789.-–— ",
+          tessedit_pageseg_mode: "6",
+        });
+        return w;
+      })();
+    }
+    return await ocrWorkerP;
+  } catch (e) {
+    return null; // CDN/model lỗi -> tắt lặng lẽ, pad chọn tay vẫn dùng được
+  }
+}
+
+// Chụp vùng trên của khung hình (nơi in "UK X.X-Y"), giới hạn 800px cho nhanh
+function captureSizeCrop() {
+  const video = document.querySelector("#reader video");
+  if (!video || !video.videoWidth) return null;
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const scale = Math.min(1, 800 / vw);
+  const cw = Math.round(vw * scale), ch = Math.round(vh * 0.42 * scale);
+  const cv = document.createElement("canvas");
+  cv.width = cw; cv.height = ch;
+  cv.getContext("2d").drawImage(video, 0, 0, vw, vh * 0.42, 0, 0, cw, ch);
+  return cv;
+}
+
+function parseSizeText(text) {
+  const m = /UK\s*(\d+(?:\.\d+)?)\s*[-–—]\s*(\d{1,2})/i.exec(text || "");
+  if (!m) return null;
+  return parseFloat(m[1]).toFixed(1) + "-" + m[2];
+}
+
+async function ocrFillSize(content) {
+  const rec0 = state.records.find((r) => r.content === content);
+  if (!rec0 || rec0.size) return; // pad đã có size -> không tốn OCR
+  const crop = captureSizeCrop(); // chụp NGAY khung hình lúc vừa quét
+  if (!crop) return;
+  if (Object.keys(ocrPending).length > 300) { for (const k in ocrPending) delete ocrPending[k]; }
+  const worker = await ensureOCR();
+  if (!worker) return;
+  let sizeStr = null;
+  try {
+    const { data } = await worker.recognize(crop);
+    if ((data.confidence || 0) >= 45) sizeStr = parseSizeText(data.text);
+  } catch (e) { return; }
+  if (!sizeStr) return;
+  ocrPending[content] = sizeStr;
+  applyOcrSize(content);
+}
+
+// Vá size OCR vào bản ghi: chỉ khi size còn trống. Được gọi sau khi OCR xong
+// và sau khi insert nền hoàn tất (đề phòng OCR xong trước khi server trả về).
+function applyOcrSize(content) {
+  const sizeStr = ocrPending[content];
+  if (!sizeStr) return;
+  const rec = state.records.find((r) => r.content === content);
+  if (!rec) return;
+  if (rec.size) { delete ocrPending[content]; return; } // người dùng đã chọn pad/sửa tay -> bỏ OCR
+  rec.size = sizeStr;
+  rec.ocrSize = true;
+  renderAll();
+  if (!rec.pending && !String(rec.id).startsWith("tmp_") && supa && schemaV4) {
+    supa.from("records").update({ size: sizeStr }).eq("id", rec.id).then(() => {}).catch(() => {});
+    delete ocrPending[content];
+  }
+  // nếu vẫn pending: addRecord sẽ gọi applyOcrSize lại sau khi insert xong
+}
+
 // Ghi 1 bản ghi, tự hạ cấp khi server chưa có cột v4.0 (chưa chạy migration)
 async function insertRecord(payload) {
   const cols = schemaV4 ? REC_FULL_COLS : REC_LEGACY_COLS;
@@ -401,6 +496,9 @@ async function addRecord(content, format) {
   showOkBox(rec);
   beep(true);
 
+  // v4.6: OCR tự đọc "UK X.X-Y" trên tem (chỉ quét camera, chạy nền, không chặn quét tiếp)
+  if (format !== "Nhập tay" && format !== "Ảnh") ocrFillSize(content).catch(() => {});
+
   try {
     const { data, error } = await insertRecord({
       content,
@@ -418,8 +516,10 @@ async function addRecord(content, format) {
     const i = state.records.findIndex((r) => r.id === tempId);
     const fresh = rowToRec(data);
     if (i >= 0) state.records[i] = fresh; else state.records.unshift(fresh);
+    applyOcrSize(content); // v4.6: vá size OCR nếu đã đọc xong trong lúc insert bay
     renderAll();
   } catch (e) {
+    delete ocrPending[content];
     state.records = state.records.filter((r) => r.id !== tempId);
     const msg = (e && e.message) || "không rõ";
     if (e && (e.code === "23505" || e.status === 409)) {
@@ -583,7 +683,7 @@ function renderTable() {
         "<td class='muted'>" + n + "</td>" +
         "<td><b>" + esc(r.chiThi || "—") + "</b></td>" +
         "<td class='editable' data-edit='po' data-id='" + r.id + "' title='Bấm để sửa PO'>" + esc(r.po || "—") + "</td>" +
-        "<td class='editable' data-edit='size' data-id='" + r.id + "' title='Bấm để sửa Size'>" + esc(r.size || "—") + "</td>" +
+        "<td class='editable' data-edit='size' data-id='" + r.id + "' title='Bấm để sửa Size'>" + esc(r.size || "—") + (r.ocrSize && r.size ? " <span title='Tự đọc từ tem (OCR)'>🤖</span>" : "") + "</td>" +
         "<td class='content'><code style='font-size:12px'>" + esc(r.content) + "</code>" +
           (r.note ? "<br><span class='muted'>" + esc(r.note) + "</span>" : "") + "</td>" +
         "<td class='muted' style='white-space:nowrap'>" + fmtTime(r.scannedAt) + "</td>" +
@@ -625,7 +725,7 @@ function beginEditCell(recId, field, td) {
       const patch = {}; patch[field] = v;
       const { error } = await supa.from("records").update(patch).eq("id", recId);
       if (error) { toast("Lỗi lưu: " + error.message, "err"); }
-      else { rec[field] = v; toast("Đã cập nhật " + label + ".", "ok"); }
+      else { rec[field] = v; if (field === "size") rec.ocrSize = false; toast("Đã cập nhật " + label + ".", "ok"); }
     }
     renderTable();
   };
@@ -1191,6 +1291,7 @@ function bindEvents() {
   $("sessionInput").addEventListener("input", (e) => { state.settings.session = e.target.value; saveStore(); });
   $("noteInput").addEventListener("input", (e) => { state.settings.note = e.target.value; saveStore(); });
   $("chkSound").addEventListener("change", (e) => { state.settings.sound = e.target.checked; saveStore(); });
+  $("chkOcr").addEventListener("change", (e) => { state.settings.ocr = e.target.checked; saveStore(); });
   $("pairsMinus").addEventListener("click", () => bumpPairs(-1));
   $("pairsPlus").addEventListener("click", () => bumpPairs(1));
 
@@ -1233,6 +1334,7 @@ async function init() {
     $("sessionInput").value = state.settings.session || "";
     $("noteInput").value = state.settings.note || "";
     $("chkSound").checked = state.settings.sound !== false;
+    $("chkOcr").checked = state.settings.ocr !== false;
     renderSizePad();
     setHttpsChip();
     setCamStatus("⚪ Camera đang tắt", "");
