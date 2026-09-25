@@ -44,6 +44,7 @@ const state = {
   scanning: false,
   cameras: [],
   cameraId: null,
+  camManual: false,     // true khi user tự chọn camera trong dropdown
   torchOn: false,
   lastContent: "",
   lastAt: 0,
@@ -532,8 +533,12 @@ async function listCameras() {
     o.value = c.id; o.textContent = c.label || ("Camera " + (i + 1));
     sel.appendChild(o);
   });
+  // Giữ lựa chọn hiện tại nếu vẫn còn (vd user chọn tay, hoặc vừa mở camera xong);
+  // nếu chưa chọn tay thì ưu tiên camera sau theo tên.
+  const has = (id) => id && state.cameras.some((c) => c.id === id);
   const back = state.cameras.find((c) => /back|rear|environment/i.test(c.label || ""));
-  sel.value = (back || state.cameras[0]).id;
+  if (has(state.cameraId)) sel.value = state.cameraId;
+  else sel.value = (back || state.cameras[0]).id;
   state.cameraId = sel.value;
 }
 
@@ -541,14 +546,17 @@ async function startScan() {
   if (state.scanning) return;
   if (typeof Html5Qrcode === "undefined") { toast("Chưa tải được thư viện quét mã. Kiểm tra mạng rồi tải lại trang.", "err"); return; }
   const camId = $("cameraSelect").value;
-  if (!camId) { toast("Không tìm thấy camera trên thiết bị này.", "err"); return; }
+  if (!camId && !state.camManual) { toast("Không tìm thấy camera trên thiết bị này.", "err"); return; }
 
   $("reader").innerHTML = "";
   html5Qr = new Html5Qrcode("reader");
   setCamStatus("⏳ Đang mở camera…", "");
+  // Chưa chọn tay -> ép dùng camera sau (trình duyệt tự chọn), tránh nhầm camera trước
+  // khi tên camera chưa đọc được (chưa cấp quyền).
+  const camConstraint = (state.camManual && camId) ? camId : { facingMode: "environment" };
   try {
     await html5Qr.start(
-      camId,
+      camConstraint,
       { fps: 15, qrbox: (w, h) => ({ width: Math.min(w, h) * 0.75, height: Math.min(w, h) * 0.75 }),
         aspectRatio: 1.0,
         // Ưu tiên bộ giải mã native của trình duyệt (nhanh hơn nhiều trên Chrome/Android),
@@ -569,6 +577,15 @@ async function startScan() {
     $("cameraSelect").disabled = true;
     setCamStatus("🟢 <b>Đang quét</b> — hướng camera vào mã", "ok");
     updateTorchBtn(); updateZoomCtl();
+    // Sau khi cấp quyền, trình duyệt mới hiện tên camera thật -> tải lại để dropdown
+    // hiện đúng tên và trỏ đúng camera đang dùng.
+    try {
+      const video = document.querySelector("#reader video");
+      const tr = video && video.srcObject ? video.srcObject.getVideoTracks()[0] : null;
+      const realId = tr && tr.getSettings ? tr.getSettings().deviceId : null;
+      if (realId) state.cameraId = realId;
+    } catch (e) {}
+    listCameras();
   } catch (e) {
     setCamStatus("🔴 Không mở được camera", "warn");
     toast("Không mở được camera: " + (e && e.message ? e.message : e) + ". Hãy cấp quyền camera hoặc dùng HTTPS.", "err");
@@ -655,7 +672,7 @@ function bindEvents() {
       if (tr) await tr.applyConstraints({ advanced: [{ zoom: v }] });
     } catch (err) { /* thiết bị không hỗ trợ thì bỏ qua */ }
   });
-  $("cameraSelect").addEventListener("change", (e) => { state.cameraId = e.target.value; });
+  $("cameraSelect").addEventListener("change", (e) => { state.camManual = true; state.cameraId = e.target.value; });
   $("btnRefreshCam").addEventListener("click", listCameras);
 
   $("btnFromFile").addEventListener("click", () => $("fileInput").click());
