@@ -1339,11 +1339,13 @@ function computeReport(dayRows) {
     if (!ranges || !ranges.length) { noPack.push({ chi_thi: ct, count: list.length }); return; }
     ranges.forEach((rg) => {
       let p = 0;
+      const boxSet = new Set();
       for (const r of list) {
         const n = boxSeq(r.content, ct);
-        if (n != null && rg.thung_tu <= n && n <= rg.thung_den) p++;
+        if (n != null && rg.thung_tu <= n && n <= rg.thung_den) { p++; boxSet.add(n); }
       }
-      rows.push({ rg: rg, p: p, q: p * (rg.doi_thung || 0), left: (rg.so_thung || 0) - p });
+      const boxes = [...boxSet].sort((a, b) => a - b);
+      rows.push({ rg: rg, p: p, q: p * (rg.doi_thung || 0), left: (rg.so_thung || 0) - p, boxes: boxes });
     });
   });
   return { rows: rows, noPack: noPack, totalScans: seen.size };
@@ -1374,17 +1376,17 @@ async function exportReport(day, palletQ) {
   const YELLOW = "FFFFFF00", GREEN = "FFC6EFCE";
   const headers = ["STT", "Mã chỉ thị", "Po#", "Art#", "SIZE", "Tổng số đôi",
     "Số đôi/thùng", "Số thùng", "Số thùng từ", "Số thùng đến",
-    "đếm số thùng", "số lượng"];
+    "đếm số thùng", "số lượng", "số thứ tự thùng"];
   const NC = headers.length;
   const wb = new ExcelJS.Workbook();
   wb.creator = "QuetDoc QRcode";
   const ws = wb.addWorksheet("Báo cáo nhập kho");
   ws.columns = [{ width: 6 }, { width: 16 }, { width: 18 }, { width: 12 }, { width: 10 },
                 { width: 14 }, { width: 14 }, { width: 12 }, { width: 14 }, { width: 14 },
-                { width: 14 }, { width: 12 }];
-  // Tiêu đề + tổng ở góc phải (đúng mẫu)
+                { width: 14 }, { width: 12 }, { width: 18 }];
+  // Tiêu đề + tổng ở góc phải (đúng mẫu): tổng luôn nằm dưới 2 cột đếm (K, L)
   const dstr = day.split("-").reverse().join("/");
-  ws.mergeCells(1, 1, 1, NC - 2);
+  ws.mergeCells(1, 1, 1, 10);
   const tc = ws.getCell(1, 1);
   tc.value = "BÁO CÁO NHẬP KHO : " + dstr + (palletQ ? " · pallet: " + palletQ : "");
   tc.font = { name: "Arial", size: 14, bold: true };
@@ -1392,7 +1394,7 @@ async function exportReport(day, palletQ) {
   ws.getRow(1).height = 26;
   let sP = 0, sQ = 0;
   rows.forEach((it) => { sP += it.p; sQ += it.q; });
-  const tp = ws.getCell(1, NC - 1), tq = ws.getCell(1, NC);
+  const tp = ws.getCell(1, 11), tq = ws.getCell(1, 12);
   tp.value = sP; tq.value = sQ;
   [tp, tq].forEach((c) => {
     c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: YELLOW } };
@@ -1411,15 +1413,17 @@ async function exportReport(day, palletQ) {
     cell.border = xlBorder();
   }
   hr.height = 22;
-  // Dữ liệu: 2 cột đếm tô xanh
+  // Dữ liệu: 2 cột đếm tô xanh; cột "số thứ tự thùng" liệt kê các số thùng đã quét
   rows.forEach((it, i) => {
     const g = it.rg;
+    const boxStr = (it.boxes || []).map((n) => String(n).padStart(3, "0")).join("\n");
     const row = ws.addRow([i + 1, g.chi_thi, g.po || "", g.art || "",
       +g.size || g.size, g.tong_doi || 0, g.doi_thung || 0, g.so_thung || 0,
-      g.thung_tu, g.thung_den, it.p, it.q]);
+      g.thung_tu, g.thung_den, it.p, it.q, boxStr]);
     row.eachCell((cell, cn) => {
       xlBodyCell(cell, cn !== 3 && cn !== 4);
-      if (cn >= NC - 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: GREEN } };
+      if (cn === NC - 2 || cn === NC - 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: GREEN } };
+      if (cn === NC) { cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true }; row.height = Math.max(18, it.boxes.length * 15); }
     });
   });
   if (rep.noPack.length) {
