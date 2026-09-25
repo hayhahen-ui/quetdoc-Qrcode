@@ -43,6 +43,7 @@ const state = {
   settings: { session: "", note: "", sound: true, sizeUK: "", pairs: 6 },
   me: null,             // user đang đăng nhập {id, username, role}
   scanning: false,
+  videoWatch: null,     // v6.3: watchdog iOS — hẹn giờ kiểm tra video có lên hình không
   cameras: [],
   cameraId: null,
   camManual: false,     // true khi user tự chọn camera trong dropdown
@@ -2043,6 +2044,51 @@ async function listCameras() {
   else if (selOpt && state.realFacing === "user") selOpt.textContent = "🤳 Camera trước — đang dùng";
 }
 
+/* ---- v6.3: chữa lỗi camera khung đen trên iOS (iPhone/iPad) ----
+ * Nguyên nhân thường gặp: (1) thiếu playsinline -> iPhone không render video
+ * inline (chỉ thấy màn hình đen); (2) deviceId exact trên iOS hay cho video
+ * đen; (3) mở trang trong webview của Zalo/Facebook -> bị chặn camera, video
+ * đen dù getUserMedia "thành công".
+ * Cách chữa: iOS luôn dùng facingMode ideal (bỏ deviceId exact), ép
+ * playsinline + play() sau khi mở, và watchdog 6s: video vẫn đen -> dừng và
+ * báo rõ cách sửa (mở bằng Safari, cấp quyền camera). */
+function isIOS() {
+  try {
+    const ua = (typeof navigator !== "undefined" && navigator.userAgent) || "";
+    if (/iPad|iPhone|iPod/.test(ua)) return true;
+    return navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1; // iPadOS 13+
+  } catch (e) { return false; }
+}
+// Tách hàm thuần để test được (harness v6.3)
+function pickCamera(ios, camManual, camId, backCam) {
+  if (ios) return { facingMode: { ideal: "environment" } }; // iOS: deviceId exact hay cho video đen
+  if (camManual && camId) return { deviceId: { exact: camId } };
+  if (backCam) return { deviceId: { exact: backCam.id } };
+  return { facingMode: "environment" };
+}
+function buildVideoConstraints(ios, camPick) {
+  const base = { width: { min: 640, ideal: 1280 }, height: { min: 480, ideal: 720 } };
+  if (!ios) base.advanced = [{ focusMode: "continuous" }]; // iOS: bỏ để giảm rủi ro
+  return Object.assign(base, camPick);
+}
+// Ép video chạy inline trên iPhone (không có playsinline thì chỉ thấy màn hình đen)
+function forceInlineVideo() {
+  try {
+    const video = document.querySelector("#reader video");
+    if (!video) return false;
+    video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
+    video.muted = true;
+    video.setAttribute("muted", "");
+    const pr = video.play();
+    if (pr && pr.catch) pr.catch(() => {});
+    return true;
+  } catch (e) { return false; }
+}
+// Video thật sự có hình không? (v: video-like {videoWidth, paused, readyState})
+function videoHasPicture(v) {
+  return !!(v && v.videoWidth > 0 && !v.paused && v.readyState >= 2);
+}
 async function startScan() {
   if (state.scanning) return;
   if (!sessionStatus().ok) { // v5.3: bắt buộc nhập đủ phiên quét
@@ -2055,12 +2101,12 @@ async function startScan() {
   // facingMode "environment": nhiều máy liệt kê lỗi nhưng getUserMedia vẫn mở được.
   // Nếu máy thật sự không có camera, lỗi sẽ báo rõ ở catch bên dưới.
 
-  // Chọn camera: (1) user chọn tay -> deviceId exact; (2) camera sau theo tên -> deviceId exact;
+  // Chọn camera: iOS luôn dùng facingMode ideal (v6.3: deviceId exact hay cho video đen);
+  // các máy khác: (1) user chọn tay -> deviceId exact; (2) camera sau theo tên -> deviceId exact;
   // (3) chưa đọc được tên -> facingMode environment.
+  const ios = isIOS();
   const backCam = state.cameras.find((c) => /(facing back|\bback\b|\brear\b|environment)/i.test(c.label || ""));
-  const camPick = (state.camManual && camId) ? { deviceId: { exact: camId } }
-    : backCam ? { deviceId: { exact: backCam.id } }
-    : { facingMode: "environment" };
+  const camPick = pickCamera(ios, state.camManual, camId, backCam);
 
   $("reader").innerHTML = "";
   html5Qr = new Html5Qrcode("reader");
@@ -2076,10 +2122,8 @@ async function startScan() {
         // tự động dùng zxing (JS) khi thiết bị không hỗ trợ.
         experimentalFeatures: { useBarCodeDetectorIfSupported: true },
         // Lấy nét liên tục + độ phân giải tốt giúp đọc mã nhanh và chính xác hơn trên điện thoại
-        videoConstraints: Object.assign(
-          { width: { min: 640, ideal: 1280 }, height: { min: 480, ideal: 720 },
-            advanced: [{ focusMode: "continuous" }] },
-          camPick),
+        // (v6.3: iOS bỏ advanced focusMode để giảm rủi ro video đen)
+        videoConstraints: buildVideoConstraints(ios, camPick),
         formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.CODE_128,
           Html5QrcodeSupportedFormats.CODE_39, Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
           Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.DATA_MATRIX] },
@@ -2088,6 +2132,20 @@ async function startScan() {
       () => {}
     );
     state.scanning = true;
+    forceInlineVideo(); // v6.3: iPhone thiếu playsinline sẽ chỉ thấy màn hình đen
+    // v6.3: watchdog — 6s sau nếu video vẫn đen (hay gặp trên iOS / webview Zalo-FB
+    // bị chặn camera) thì dừng và báo rõ cách sửa thay vì để khung đen treo máy.
+    clearTimeout(state.videoWatch);
+    state.videoWatch = setTimeout(() => {
+      if (!state.scanning) return;
+      let v = null;
+      try { v = document.querySelector("#reader video"); } catch (e) {}
+      if (!videoHasPicture(v)) {
+        stopScan();
+        setCamStatus("🔴 Camera không lên hình", "warn");
+        toast("Không lấy được hình camera (khung đen). Trên iPhone làm 3 bước: 1) Mở trang bằng Safari — đừng mở trong Zalo/Facebook (bấm ••• → Mở bằng Safari); 2) Cài đặt iPhone → Safari → Camera → Cho phép; 3) Tải lại trang, bấm Bắt đầu quét và chọn Cho phép khi được hỏi.", "err");
+      }
+    }, 6000);
     ensureOCR().catch(() => {}); // v4.8: tải trước thư viện OCR khi mở camera để quét đầu không phải chờ
     $("btnStart").disabled = true; $("btnStop").disabled = false;
     $("cameraSelect").disabled = true;
@@ -2115,6 +2173,7 @@ async function startScan() {
 }
 async function stopScan() {
   if (!state.scanning || !html5Qr) return;
+  clearTimeout(state.videoWatch); // v6.3: hủy watchdog kiểm tra video
   try { await html5Qr.stop(); } catch (e) {}
   try { html5Qr.clear(); } catch (e) {}
   state.scanning = false; state.torchOn = false; state.realFacing = "";
