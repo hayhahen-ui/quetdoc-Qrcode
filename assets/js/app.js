@@ -860,8 +860,12 @@ function summarizeDay(rows) {
   return [...byUser.values()].sort((a, b) => dName(a.user).localeCompare(dName(b.user), "vi"));
 }
 function sumCell(t) {
-  return t.boxes ? "<b>" + num(t.boxes) + "</b> · " + num(t.pairs) : "<span class='muted'>—</span>";
+  return t.boxes ? "<b>" + fmtNum(t.boxes) + "</b> · " + fmtNum(t.pairs) : "<span class='muted'>—</span>";
 }
+/* v6.8.1: định dạng số hiển thị ở phạm vi toàn cục.
+ * (Trước đây sumCell/renderUserSummary gọi "num" — nhưng num chỉ là const
+ * cục bộ trong renderDashboard/packing form -> ReferenceError "num is not defined".) */
+function fmtNum(n) { return (+n || 0).toLocaleString("vi-VN"); }
 async function renderUserSummary() {
   const body = $("sumBody");
   if (!body || !isAdmin()) return;
@@ -886,14 +890,14 @@ async function renderUserSummary() {
         "<td>" + sumCell(g.types["kiểm"]) + "</td>" +
         "<td>" + sumCell(g.types["nhập"]) + "</td>" +
         "<td>" + sumCell(g.types["xuất"]) + "</td>" +
-        "<td><b>" + num(g.pallets.size) + "</b></td>" +
-        "<td><b>" + num(g.boxes) + "</b></td>" +
-        "<td><b>" + num(g.pairs) + "</b></td></tr>";
+        "<td><b>" + fmtNum(g.pallets.size) + "</b></td>" +
+        "<td><b>" + fmtNum(g.boxes) + "</b></td>" +
+        "<td><b>" + fmtNum(g.pairs) + "</b></td></tr>";
     }).join("");
     body.innerHTML = html +
       "<tr class='sum-total'><td><b>TỔNG CỘNG</b></td>" +
       "<td>" + sumCell(tot["kiểm"]) + "</td><td>" + sumCell(tot["nhập"]) + "</td><td>" + sumCell(tot["xuất"]) + "</td>" +
-      "<td><b>" + num(tot.pallets.size) + "</b></td><td><b>" + num(tot.boxes) + "</b></td><td><b>" + num(tot.pairs) + "</b></td></tr>";
+      "<td><b>" + fmtNum(tot.pallets.size) + "</b></td><td><b>" + fmtNum(tot.boxes) + "</b></td><td><b>" + fmtNum(tot.pairs) + "</b></td></tr>";
   } catch (e) {
     body.innerHTML = "<tr><td colspan='7'>⚠ Không tải được số liệu ngày " + dayLabel + ": " +
       esc((e && e.message) || e) + "<br><span class='muted'>Bấm nút ↻ phía trên để thử lại.</span></td></tr>";
