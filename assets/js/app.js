@@ -234,6 +234,7 @@ async function enterApp() {
   }
   refreshSession(); // v5.3: đối chiếu phiên quét với dữ liệu vừa tải + bật/tắt nút quét
   refreshDashboard(); // v5.4: tải số liệu dashboard (không chặn UI)
+  if (admin) renderUserSummary(); // v6.7: tổng hợp theo nhân viên (không chặn UI)
 }
 
 /* ---------------- realtime: tự cập nhật khi máy khác quét ---------------- */
@@ -817,10 +818,99 @@ function updateScanGate() {
 }
 function renderAll() {
   if (!state.me) { doLogout(); return; }
-  renderStats(); renderTable();
+  renderStats(); renderTable(); scheduleSummary(); // v6.7
   const n = visibleRecords().length;
   $("btnExportXlsx").disabled = $("btnExportCsv").disabled = $("btnExportJson").disabled = $("btnClear").disabled = !n;
   refreshReportBtn();
+}
+
+/* ---- v6.7: TỔNG HỢP THEO NHÂN VIÊN (chỉ admin, theo ngày) ----
+ * Mỗi user 1 dòng: Kiểm/Nhập/Xuất (số thùng · số đôi), số pallet (phiên quét
+ * khác nhau), tổng thùng, tổng đôi + dòng TỔNG CỘNG. Số liệu tải đủ cả ngày
+ * từ server (không phụ thuộc 500 dòng đang hiển thị). */
+function parseSessType(sess) {
+  // Bỏ dấu trước khi so khớp (kiểm/kiềm/ể/ế... đều về "kiem")
+  const s = String(sess || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (s.startsWith("kiem")) return "kiểm";
+  if (s.startsWith("nhap")) return "nhập";
+  if (s.startsWith("xuat")) return "xuất";
+  return "khác";
+}
+// Gom bản ghi 1 ngày -> [{user, types:{kiểm/nhập/xuất/khác:{boxes,pairs}}, pallets:Set, boxes, pairs}]
+// Tách hàm thuần để test (harness v6.7); boxPairs/dName/norm/parseChiThi truyền từ ngoài khi test.
+function summarizeDay(rows) {
+  const seen = new Set();
+  const byUser = new Map();
+  const mk = () => ({ boxes: 0, pairs: 0 });
+  (rows || []).forEach((r) => {
+    const k = norm(r.content || "");
+    if (!k || seen.has(k)) return; // mỗi số thùng chỉ đếm 1 lần
+    seen.add(k);
+    const u = (r.username || "").trim() || "(không tên)";
+    if (!byUser.has(u)) byUser.set(u, { user: u, types: { "kiểm": mk(), "nhập": mk(), "xuất": mk(), "khác": mk() }, pallets: new Set(), boxes: 0, pairs: 0 });
+    const g = byUser.get(u);
+    const t = parseSessType(r.session);
+    const ct = (r.chi_thi || parseChiThi(r.content || "")).toUpperCase();
+    const pairs = boxPairs(ct, r.content, r.size);
+    g.types[t].boxes++; g.types[t].pairs += pairs;
+    g.boxes++; g.pairs += pairs;
+    const sess = (r.session || "").trim();
+    if (sess) g.pallets.add(sess);
+  });
+  return [...byUser.values()].sort((a, b) => dName(a.user).localeCompare(dName(b.user), "vi"));
+}
+function sumCell(t) {
+  return t.boxes ? "<b>" + num(t.boxes) + "</b> · " + num(t.pairs) : "<span class='muted'>—</span>";
+}
+async function renderUserSummary() {
+  const body = $("sumBody");
+  if (!body || !isAdmin()) return;
+  const inp = $("sumDate");
+  if (inp && !inp.value) inp.value = todayStr();
+  const day = inp ? inp.value : todayStr();
+  body.innerHTML = "<tr><td colspan='7' class='muted'>Đang tải số liệu ngày " + esc(day.split("-").reverse().join("/")) + "…</td></tr>";
+  let rows;
+  try { rows = await fetchDayRecords(day); }
+  catch (e) { body.innerHTML = "<tr><td colspan='7' class='muted'>Không tải được: " + esc(e.message || e) + "</td></tr>"; return; }
+  const users = summarizeDay(rows);
+  if (!users.length) {
+    body.innerHTML = "<tr><td colspan='7' class='muted'>Ngày này chưa có bản ghi nào.</td></tr>";
+    return;
+  }
+  const tot = { "kiểm": { boxes: 0, pairs: 0 }, "nhập": { boxes: 0, pairs: 0 }, "xuất": { boxes: 0, pairs: 0 }, boxes: 0, pairs: 0, pallets: new Set() };
+  const html = users.map((g) => {
+    ["kiểm", "nhập", "xuất"].forEach((t) => { tot[t].boxes += g.types[t].boxes; tot[t].pairs += g.types[t].pairs; });
+    tot.boxes += g.boxes; tot.pairs += g.pairs;
+    g.pallets.forEach((p) => tot.pallets.add(g.user + "‖" + p));
+    return "<tr><td><b>" + esc(dName(g.user)) + "</b></td>" +
+      "<td>" + sumCell(g.types["kiểm"]) + "</td>" +
+      "<td>" + sumCell(g.types["nhập"]) + "</td>" +
+      "<td>" + sumCell(g.types["xuất"]) + "</td>" +
+      "<td><b>" + num(g.pallets.size) + "</b></td>" +
+      "<td><b>" + num(g.boxes) + "</b></td>" +
+      "<td><b>" + num(g.pairs) + "</b></td></tr>";
+  }).join("");
+  body.innerHTML = html +
+    "<tr class='sum-total'><td><b>TỔNG CỘNG</b></td>" +
+    "<td>" + sumCell(tot["kiểm"]) + "</td><td>" + sumCell(tot["nhập"]) + "</td><td>" + sumCell(tot["xuất"]) + "</td>" +
+    "<td><b>" + num(tot.pallets.size) + "</b></td><td><b>" + num(tot.boxes) + "</b></td><td><b>" + num(tot.pairs) + "</b></td></tr>";
+}
+function shiftSumDate(d) {
+  const inp = $("sumDate");
+  const dt = new Date((inp.value || todayStr()) + "T00:00:00+07:00");
+  dt.setDate(dt.getDate() + d);
+  inp.value = dt.toLocaleDateString("en-CA", { timeZone: "Asia/Ho_Chi_Minh" });
+  renderUserSummary();
+}
+// Tự refresh khi có bản ghi mới và đang xem đúng hôm nay (debounce)
+let sumTimer = null;
+function scheduleSummary() {
+  if (!isAdmin()) return;
+  const inp = $("sumDate");
+  if (!inp || typeof inp.closest !== "function" || inp.closest(".hidden")) return;
+  if ((inp.value || todayStr()) !== todayStr()) return;
+  clearTimeout(sumTimer);
+  sumTimer = setTimeout(() => { renderUserSummary().catch(() => {}); }, 800);
 }
 
 /* v5.4: DASHBOARD sản lượng — số thùng, số đôi, pallet, người quét,
@@ -951,6 +1041,7 @@ function renderHead() {
   const admin = isAdmin();
   $("theadRow").innerHTML = "<tr><th>#</th><th>Chỉ thị</th><th>PO</th><th>Size</th><th>Số thùng</th>" +
     "<th>Giờ quét</th><th>Số pallet</th>" + (admin ? "<th>Người quét</th>" : "") + "<th></th></tr>";
+  $("userSummary").classList.toggle("hidden", !admin); // v6.7: tổng hợp theo NV chỉ admin
 }
 
 function renderTable() {
@@ -1685,7 +1776,7 @@ function openReportModal() {
 async function fetchDayRecords(day) {
   const t0 = new Date(day + "T00:00:00+07:00");
   const t1 = new Date(t0); t1.setDate(t1.getDate() + 1);
-  const cols = schemaV4 ? "content,chi_thi,session,scanned_at,username" : "content,session,scanned_at,username";
+  const cols = schemaV4 ? "content,chi_thi,session,scanned_at,username,size" : "content,session,scanned_at,username"; // v6.7: thêm size để tính tổng số đôi
   let all = [], from = 0;
   for (;;) {
     let q = supa.from("records").select(cols)
@@ -2417,6 +2508,11 @@ function bindEvents() {
   $("btnExportCsv").addEventListener("click", exportCSV);
   $("btnExportJson").addEventListener("click", exportJSON);
   $("btnExportReport").addEventListener("click", openReportModal); // v5.0: báo cáo sản lượng
+  // v6.7: tổng hợp theo nhân viên
+  $("btnSumPrev").addEventListener("click", () => shiftSumDate(-1));
+  $("btnSumNext").addEventListener("click", () => shiftSumDate(1));
+  $("btnSumReload").addEventListener("click", () => renderUserSummary());
+  $("sumDate").addEventListener("change", () => renderUserSummary());
   $("btnDashRefresh").addEventListener("click", refreshDashboard); // v5.4
   $("btnClear").addEventListener("click", clearAll);
 

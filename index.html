@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0B0E13">
 <meta name="description" content="QuetDoc QRcode — Quét mã QR/barcode bằng camera và ghi nhận dữ liệu, phân quyền quản trị / nhân viên.">
 <title>QuetDoc QRcode · Quét mã & ghi nhận dữ liệu</title>
-<link rel="stylesheet" href="assets/css/styles.css?v=6.6">
+<link rel="stylesheet" href="assets/css/styles.css?v=6.7">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" async></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" async></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" async></script>
@@ -205,6 +205,29 @@
         <button class="small danger" id="btnClear">🗑 Xóa tất cả</button>
       </div>
 
+      <!-- v6.7: tổng hợp theo nhân viên (chỉ admin) -->
+      <div id="userSummary" class="hidden">
+        <div class="sumbar">
+          <h3 class="sec-title" style="font-size:15px;margin:0">📊 Tổng hợp theo nhân viên</h3>
+          <div class="toolbar" style="margin:0">
+            <button class="small" id="btnSumPrev" title="Ngày trước">‹</button>
+            <input type="date" id="sumDate" style="min-width:135px">
+            <button class="small" id="btnSumNext" title="Ngày sau">›</button>
+            <button class="small" id="btnSumReload" title="Tải lại">↻</button>
+          </div>
+        </div>
+        <div class="tablewrap"><table>
+          <thead><tr>
+            <th>Nhân viên</th>
+            <th>Kiểm<br><span class="muted" style="font-weight:400">thùng · đôi</span></th>
+            <th>Nhập<br><span class="muted" style="font-weight:400">thùng · đôi</span></th>
+            <th>Xuất<br><span class="muted" style="font-weight:400">thùng · đôi</span></th>
+            <th>Pallet</th><th>Tổng thùng</th><th>Tổng đôi</th>
+          </tr></thead>
+          <tbody id="sumBody"></tbody>
+        </table></div>
+      </div>
+
       <div class="tablewrap">
         <table>
           <thead id="theadRow"></thead>
@@ -293,7 +316,7 @@
   </section>
 
   <footer>
-    QuetDoc QRcode · <b>v6.6</b> · đồng bộ Supabase (đa thiết bị).<br>
+    QuetDoc QRcode · <b>v6.7</b> · đồng bộ Supabase (đa thiết bị).<br>
     💡 Mẹo: mở trang bằng <b>HTTPS</b> thì trình duyệt mới cho phép dùng camera.
   </footer>
 </div>
@@ -312,6 +335,6 @@
 </div>
 
 <div id="toasts"></div>
-<script src="assets/js/app.js?v=6.6" defer></script>
+<script src="assets/js/app.js?v=6.7" defer></script>
 </body>
 </html>
