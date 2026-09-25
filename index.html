@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0B0E13">
 <meta name="description" content="QuetDoc QRcode — Quét mã QR/barcode bằng camera và ghi nhận dữ liệu, phân quyền quản trị / nhân viên.">
 <title>QuetDoc QRcode · Quét mã & ghi nhận dữ liệu</title>
-<link rel="stylesheet" href="assets/css/styles.css?v=6.0">
+<link rel="stylesheet" href="assets/css/styles.css?v=6.1">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" async></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" async></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" async></script>
@@ -20,6 +20,7 @@
   <div class="login-card card">
     <div class="logo big">📷</div>
     <h1>QuetDoc QRcode</h1>
+    <p class="tagline-login">Quét là ghi.</p>
     <p class="sub">Đăng nhập để quét mã &amp; ghi nhận dữ liệu</p>
     <div class="field">
       <label for="loginUser">Tên đăng nhập</label>
@@ -47,7 +48,7 @@
     <div class="brand">
       <div class="logo">📷</div>
       <div>
-        <h1>QuetDoc QRcode</h1>
+        <h1>QuetDoc QRcode <span class="tagline">Quét là ghi.</span></h1>
         <p class="sub">Quét mã thùng giày · tự tách Chỉ thị · xuất Excel theo mẫu</p>
       </div>
     </div>
@@ -73,14 +74,14 @@
       </div>
       <div>
         <h3 class="dash-h">👷 Sản lượng theo người quét</h3>
-        <div style="overflow-x:auto"><table id="dashUsers">
+        <div class="tablewrap short"><table id="dashUsers">
           <thead><tr><th>Người quét</th><th>Số thùng</th><th>Số đôi</th><th>Pallet</th><th>Lần cuối</th></tr></thead>
           <tbody><tr><td colspan="5" class="muted">—</td></tr></tbody>
         </table></div>
       </div>
     </div>
     <h3 class="dash-h">📦 Tiến độ theo chỉ thị <span class="muted" style="font-weight:400">(kế hoạch từ packing · ngày xuất &amp; quốc gia từ master đơn hàng)</span></h3>
-    <div style="overflow-x:auto"><table id="dashDirs">
+    <div class="tablewrap short"><table id="dashDirs">
       <thead><tr><th>Chỉ thị</th><th>PO</th><th>Quốc gia</th><th>Ngày xuất</th><th>Đã quét / Kế hoạch</th><th>Tiến độ</th><th>Số đôi</th></tr></thead>
       <tbody><tr><td colspan="7" class="muted">—</td></tr></tbody>
     </table></div>
@@ -88,43 +89,8 @@
 
   <div class="grid2">
     <section class="card pad">
-      <h2 class="sec-title">📷 Quét mã</h2>
-      <p class="sec-hint">Hướng camera vào mã QR / barcode. Mỗi mã chỉ ghi nhận <b>1 lần duy nhất</b> — quét lại sẽ chỉ cảnh báo "Đã được quét".</p>
-      <div id="reader"><div class="reader-idle">📷<br>Nhấn <b>Bắt đầu quét</b> để mở camera</div></div>
-
-      <div class="rowflex" style="margin-top:12px">
-        <div class="field inline">
-          <label for="cameraSelect">Camera</label>
-          <select id="cameraSelect"><option>Đang tìm camera…</option></select>
-        </div>
-        <button class="small" id="btnRefreshCam" title="Quét lại danh sách camera">↻</button>
-      </div>
-
-      <div class="rowflex hidden" id="zoomRow" style="margin-top:8px">
-        <div class="field inline" style="flex:1">
-          <label for="zoomRange">🔍 Thu phóng <span id="zoomVal" class="muted"></span></label>
-          <input type="range" id="zoomRange" min="1" max="1" step="0.1" value="1" style="width:100%">
-        </div>
-      </div>
-
-      <div class="btnrow">
-        <button class="primary" id="btnStart">▶ Bắt đầu quét</button>
-        <button id="btnStop" disabled>⏹ Dừng</button>
-        <button id="btnTorch" class="hidden">🔦 Bật đèn</button>
-        <button id="btnFromFile">🖼 Quét từ ảnh</button>
-        <input type="file" id="fileInput" accept="image/*" class="hidden">
-      </div>
-
-      <div class="rowflex" style="margin-top:12px">
-        <div class="field inline">
-          <label for="manualInput">Nhập tay (khi không quét được)</label>
-          <input type="text" id="manualInput" placeholder="Dán / gõ nội dung mã rồi Enter">
-        </div>
-        <button id="btnManualAdd">＋ Thêm</button>
-      </div>
-
-      <div class="sessblock" style="margin-top:12px">
-        <label class="seclabel">🎯 <b>Phiên quét — bắt buộc nhập đủ mới quét được</b></label>
+      <h2 class="sec-title"><span class="step">1</span>🎯 Phiên quét <span class="muted" style="font-weight:400">— bắt buộc nhập đủ mới quét được</span></h2>
+      <div class="sessblock">
         <div class="sessgrid">
           <div class="field">
             <label for="sessType">Loại pallet</label>
@@ -163,8 +129,43 @@
         </div>
       </div>
 
-      <div class="sizeblock" style="margin-top:12px">
-        <label class="seclabel">Size thùng (UK) — <b>đã có packing list thì app tự điền</b> <span title="Tự tra từ packing list">📦</span>; chỉ chạm chọn khi tem không có trong packing</label>
+      <h2 class="sec-title sec-gap"><span class="step">2</span>📷 Quét mã</h2>
+      <p class="sec-hint">Hướng camera vào mã QR / barcode. Mỗi mã chỉ ghi nhận <b>1 lần duy nhất</b> — quét lại sẽ chỉ cảnh báo "Đã được quét".</p>
+      <div id="reader"><div class="reader-idle">📷<br>Nhấn <b>Bắt đầu quét</b> để mở camera</div></div>
+
+      <div class="rowflex" style="margin-top:12px">
+        <div class="field inline">
+          <label for="cameraSelect">Camera</label>
+          <select id="cameraSelect"><option>Đang tìm camera…</option></select>
+        </div>
+        <button class="small" id="btnRefreshCam" title="Quét lại danh sách camera">↻</button>
+      </div>
+
+      <div class="rowflex hidden" id="zoomRow" style="margin-top:8px">
+        <div class="field inline" style="flex:1">
+          <label for="zoomRange">🔍 Thu phóng <span id="zoomVal" class="muted"></span></label>
+          <input type="range" id="zoomRange" min="1" max="1" step="0.1" value="1" style="width:100%">
+        </div>
+      </div>
+
+      <div class="btnrow">
+        <button class="primary" id="btnStart">▶ Bắt đầu quét</button>
+        <button id="btnStop" disabled>⏹ Dừng</button>
+        <button id="btnTorch" class="hidden">🔦 Bật đèn</button>
+        <button id="btnFromFile">🖼 Quét từ ảnh</button>
+        <input type="file" id="fileInput" accept="image/*" class="hidden">
+      </div>
+
+      <div class="rowflex" style="margin-top:12px">
+        <div class="field inline">
+          <label for="manualInput">Nhập tay (khi không quét được)</label>
+          <input type="text" id="manualInput" placeholder="Dán / gõ nội dung mã rồi Enter">
+        </div>
+        <button id="btnManualAdd">＋ Thêm</button>
+      </div>
+
+      <h2 class="sec-title sec-gap"><span class="step">3</span>📐 Size thùng (UK) <span class="muted" style="font-weight:400">— đã có packing thì app tự điền 📦</span></h2>
+      <div class="sizeblock">
         <div class="sizepad" id="sizePad"></div>
         <div class="pairsrow">
           <span>Số đôi / thùng:</span>
@@ -174,6 +175,8 @@
           <span class="muted" id="sizePreview"></span>
         </div>
       </div>
+
+
 
       <div class="btnrow" style="margin-top:12px">
         <label class="check"><input type="checkbox" id="chkSound" checked> Âm báo khi quét</label>
@@ -202,7 +205,7 @@
         <button class="small danger" id="btnClear">🗑 Xóa tất cả</button>
       </div>
 
-      <div style="overflow-x:auto">
+      <div class="tablewrap">
         <table>
           <thead id="theadRow"></thead>
           <tbody id="tbody"></tbody>
@@ -290,7 +293,7 @@
   </section>
 
   <footer>
-    QuetDoc QRcode · <b>v6.0</b> · đồng bộ Supabase (đa thiết bị).<br>
+    QuetDoc QRcode · <b>v6.1</b> · đồng bộ Supabase (đa thiết bị).<br>
     💡 Mẹo: mở trang bằng <b>HTTPS</b> thì trình duyệt mới cho phép dùng camera.
   </footer>
 </div>

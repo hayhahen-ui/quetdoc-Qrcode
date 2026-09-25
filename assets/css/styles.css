@@ -217,3 +217,29 @@ td.editable:hover{background:rgba(245,158,11,.14)}
 }
 /* v6.0: số liệu trong banner quét cũng tabular */
 .lastscan b{font-variant-numeric:tabular-nums}
+
+/* ============ v6.1: làm mới trực quan — nhìn thấy được ============ */
+/* Tagline thương hiệu */
+.tagline{display:inline-block;font-size:11px;font-weight:800;color:#03150f;background:var(--emerald);
+  border-radius:999px;padding:3px 11px;vertical-align:middle;margin-left:8px;letter-spacing:.03em;white-space:nowrap}
+.tagline-login{margin:6px 0 2px;font-size:15px;font-weight:800;color:var(--emerald);letter-spacing:.02em}
+/* Huy hiệu số bước trong thẻ quét */
+.step{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;flex:none;
+  background:var(--emerald);color:#03150f;font-size:14px;font-weight:800;margin-right:9px}
+.sec-title{display:flex;align-items:center;font-size:16px}
+.sec-gap{margin-top:20px}
+/* Nút quét chính: điểm nhấn phát sáng nhẹ */
+#btnStart{box-shadow:0 8px 24px -8px rgba(16,185,129,.55)}
+#btnStart:hover:not(:disabled){box-shadow:0 8px 28px -6px rgba(16,185,129,.7)}
+/* Bảng cuộn + sticky header (cockpit) */
+.tablewrap{max-height:460px;overflow:auto;border:1px solid var(--border);border-radius:var(--r-md)}
+.tablewrap.short{max-height:300px}
+.tablewrap thead th{position:sticky;top:0;background:var(--card);z-index:2;box-shadow:0 1px 0 var(--border)}
+/* Tiêu đề dashboard: vạch nhấn emerald */
+.dash-h{display:flex;align-items:center;font-size:15px;border-left:3px solid var(--emerald);padding-left:10px}
+/* KPI cockpit: số to hơn, nhãn rõ */
+.dkpi .l{font-size:11.5px}
+.dkpi .h{font-size:11.5px}
+/* Logo đăng nhập lớn hơn */
+.login-card .logo.big{width:64px;height:64px;font-size:30px;border-radius:18px}
+.login-card h1{font-size:22px}
