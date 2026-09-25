@@ -1,18 +1,48 @@
-# QuetDoc QRcode 📷
+# QuetDoc QRcode 📷☁️
 
 Quét mã **QR / barcode** bằng camera và **ghi nhận dữ liệu** (nội dung mã, thời gian, phiên, ghi chú, người quét) —
-chạy 100% trên trình duyệt, không cần server. Có **đăng nhập phân quyền** quản trị / nhân viên.
+**đồng bộ trực tiếp đa thiết bị** qua Supabase. Có **đăng nhập phân quyền** quản trị / nhân viên.
 
-## Tài khoản mặc định
+## Tài khoản mặc định (tạo trong Supabase Dashboard → Authentication → Users)
 
 | Tài khoản | Mật khẩu | Quyền |
 |---|---|---|
-| `admin` | `admin` | Full: xem mọi bản ghi, quản lý tài khoản (thêm/xóa/đặt lại MK), xóa toàn bộ dữ liệu |
-| `user1` … `user5` | `123456` | Chỉ quét, chỉ xem bản ghi của mình, đổi tên đăng nhập, đổi mật khẩu |
+| `admin` | `admin` | Xem mọi bản ghi (trực tiếp), xóa bản ghi, xóa toàn bộ dữ liệu, xem danh sách tài khoản |
+| `user1` … `user5` | `123456` | Chỉ quét, chỉ xem bản ghi của mình, đổi mật khẩu |
 
-> Mật khẩu lưu dưới dạng băm SHA-256 + salt. Lưu ý: xác thực chạy hoàn toàn phía
-> trình duyệt (localStorage) nên phù hợp "phân quyền vận hành", chưa phải bảo mật
-> cấp server. Cần bảo mật thật → bổ sung backend (Supabase Auth).
+> Email nội bộ: `user1` → `user1@quetdoc.local` (tự ánh xạ trong app, người dùng vẫn gõ tên ngắn).
+> Thêm/xóa/đặt lại mật khẩu tài khoản: thực hiện trong Supabase Dashboard → Authentication → Users.
+
+## Kiến trúc v3 (đồng bộ cloud)
+
+- **Supabase Postgres**: bảng `records` (bản ghi chung) + `profiles` (username, role).
+- **Chống trùng toàn cục**: unique index `upper(trim(content))` — 2 máy quét cùng 1 mã cùng lúc thì chỉ 1 được ghi nhận, máy còn lại báo "Đã được quét".
+- **Row Level Security**: user chỉ đọc/ghi bản ghi của mình; admin đọc/xóa toàn bộ.
+- **Realtime**: admin (và user) tự thấy bản ghi mới mà không cần tải lại trang.
+
+## Tính năng
+
+- 🔐 Đăng nhập phân quyền **admin / nhân viên** (Supabase Auth)
+- 📷 Quét live bằng camera (chọn camera trước/sau, bật đèn flash nếu máy hỗ trợ)
+- 🖼 Quét mã từ ảnh tải lên · ⌨️ nhập tay khi không quét được
+- 🛡 Mỗi mã chỉ ghi nhận **1 lần duy nhất trên toàn hệ thống** — quét trùng thì bỏ qua, chỉ cảnh báo "Đã được quét"
+- ☁️ Đồng bộ trực tiếp đa thiết bị (Supabase + realtime)
+- 🔍 Tìm kiếm, lọc theo ngày, phân trang
+- ⬇ Xuất **CSV** (mở ngon bằng Excel, có dấu tiếng Việt) và **JSON**
+- 📊 Thống kê: tổng lượt quét / hôm nay / mã duy nhất / lượt bỏ qua trùng
+
+## Cấu hình Supabase (làm 1 lần)
+
+1. Tạo project miễn phí tại [supabase.com](https://supabase.com).
+2. **SQL Editor** → New query → chạy SQL tạo bảng `profiles`, `records`, unique index
+   chống trùng, realtime và các RLS policy (xem `docs/supabase-setup.sql`).
+3. **Authentication** → **Users** → Add user (bật **Auto Confirm user**):
+   `admin@quetdoc.local` / `admin`, `user1@quetdoc.local` / `123456` … `user5@quetdoc.local` / `123456`.
+4. **Project Settings** → **API**: copy **Project URL** và **anon public key**
+   → dán vào `SUPABASE_URL` / `SUPABASE_ANON_KEY` ở đầu `assets/js/app.js`.
+
+> Gói Free: project tự "ngủ" sau 1 thời gian không dùng — lần truy cập đầu có thể
+> chậm vài giây để "đánh thức", sau đó chạy bình thường.
 
 ## Tính năng
 

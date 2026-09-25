@@ -6,11 +6,34 @@
 "use strict";
 
 const STORE_KEY = "quetdoc_qrcode_v1";
-const USERS_KEY = "quetdoc_users_v1";
-const SESSION_KEY = "quetdoc_session_v1";
 const DUP_COOLDOWN_MS = 2500;
 const PAGE_SIZE = 50;
 const TZ = "Asia/Ho_Chi_Minh";
+
+/* ---------------- Supabase (đồng bộ cloud đa thiết bị) ---------------- */
+const SUPABASE_URL = "https://cdxoaoemnidwuzentxrc.supabase.co";
+const SUPABASE_ANON_KEY = "__SUPABASE_ANON_KEY__"; // TODO: dán anon key vào trước khi deploy
+const EMAIL_DOMAIN = "quetdoc.local"; // user1 -> user1@quetdoc.local (email nội bộ)
+const emailOf = (u) => String(u || "").trim().toLowerCase() + "@" + EMAIL_DOMAIN;
+
+let supa = null;       // Supabase client
+let rtChannel = null;  // kênh realtime
+let reloadTimer = null;
+
+// Đợi thư viện supabase-js (nạp async, không chặn trang). Ném lỗi nếu quá lâu.
+async function ensureSupa() {
+  if (supa) return supa;
+  for (let i = 0; i < 40; i++) {
+    try {
+      if (typeof window.supabase !== "undefined" && window.supabase.createClient) {
+        supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        return supa;
+      }
+    } catch (e) {}
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error("Không tải được thư viện kết nối máy chủ. Kiểm tra mạng rồi tải lại trang.");
+}
 
 /* ---------------- state ---------------- */
 const state = {
@@ -83,88 +106,46 @@ function beep(ok) {
 }
 function beepDup() { beep(false); setTimeout(() => beep(false), 200); }
 
-/* ---------------- storage: bản ghi ---------------- */
+/* ---------------- storage: cài đặt trên máy (phiên, ghi chú, âm thanh) ----------------
+ * Bản ghi quét giờ lưu trên Supabase (đồng bộ đa thiết bị), không còn trong localStorage. */
 function loadStore() {
   try {
     const raw = safeLS.get(STORE_KEY);
     if (!raw) return;
     const data = JSON.parse(raw);
-    if (Array.isArray(data.records)) state.records = data.records;
     if (typeof data.dupSkipped === "number") state.dupSkipped = data.dupSkipped;
     if (data.settings && typeof data.settings === "object") {
       state.settings = Object.assign(state.settings, data.settings);
     }
-  } catch (e) { console.warn("Không đọc được dữ liệu cũ:", e); }
+  } catch (e) { console.warn("Không đọc được cài đặt cũ:", e); }
 }
 function saveStore() {
-  try {
-    safeLS.set(STORE_KEY, JSON.stringify({
-      records: state.records, dupSkipped: state.dupSkipped, settings: state.settings, v: 2,
-    }));
-  } catch (e) { toast("Bộ nhớ trình duyệt đầy, không lưu được bản ghi mới.", "err"); }
+  safeLS.set(STORE_KEY, JSON.stringify({
+    dupSkipped: state.dupSkipped, settings: state.settings, v: 3,
+  }));
 }
 
-/* ---------------- auth: băm mật khẩu ---------------- */
-async function sha256Hex(str) {
-  try {
-    if (window.crypto && crypto.subtle) {
-      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
-      return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
-    }
-  } catch (e) { /* rơi xuống fallback */ }
-  // Fallback khi không có crypto.subtle (môi trường không an toàn)
-  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
-  for (let i = 0; i < str.length; i++) {
-    const ch = str.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677);
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return "x" + (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
-}
-function makeSalt() {
-  try {
-    const a = new Uint8Array(12);
-    crypto.getRandomValues(a);
-    return Array.from(a).map((b) => b.toString(16).padStart(2, "0")).join("");
-  } catch (e) { return "s" + Math.random().toString(36).slice(2) + Date.now().toString(36); }
-}
-const pwHash = (pw, salt) => sha256Hex(salt + "::" + pw);
-
-/* ---------------- auth: users & session ---------------- */
-function getUsers() {
-  try { const u = JSON.parse(safeLS.get(USERS_KEY)); return Array.isArray(u) ? u : []; }
-  catch (e) { return []; }
-}
-function saveUsers(u) { safeLS.set(USERS_KEY, JSON.stringify(u)); }
-function findUserByName(name) {
-  const n = String(name || "").trim().toLowerCase();
-  return getUsers().find((u) => u.username.toLowerCase() === n) || null;
-}
-async function seedUsers() {
-  if (safeLS.get(USERS_KEY) != null) return;
-  const users = [];
-  const add = async (username, password, role) => {
-    const salt = makeSalt();
-    users.push({ id: uid(), username, salt, passHash: await pwHash(password, salt), role, createdAt: new Date().toISOString() });
-  };
-  await add("admin", "admin", "admin");
-  for (let i = 1; i <= 5; i++) await add("user" + i, "123456", "user");
-  saveUsers(users);
-}
-function getSession() {
-  try { return JSON.parse(safeLS.get(SESSION_KEY)); } catch (e) { return null; }
-}
-function setSession(s) {
-  if (s) safeLS.set(SESSION_KEY, JSON.stringify(s));
-  else safeLS.del(SESSION_KEY);
-}
-function currentUser() {
-  const s = getSession();
-  if (!s || !s.userId) return null;
-  return getUsers().find((u) => u.id === s.userId) || null;
-}
+/* ---------------- auth (Supabase Auth - đồng bộ đa thiết bị) ---------------- */
+// Người dùng vẫn gõ tên ngắn (user1); app tự đổi thành email nội bộ user1@quetdoc.local
 const isAdmin = () => !!(state.me && state.me.role === "admin");
+
+async function afterAuth(sb, user) {
+  const uname = String(user.email || "").split("@")[0].toLowerCase();
+  const role = uname === "admin" ? "admin" : "user";
+  try {
+    await sb.from("profiles").upsert({ id: user.id, username: uname, role }, { onConflict: "id" });
+  } catch (e) { console.warn("upsert profile:", e.message); }
+  let prof = null;
+  try {
+    const r = await sb.from("profiles").select("username,role").eq("id", user.id).single();
+    prof = r.data || null;
+  } catch (e) {}
+  state.me = { id: user.id, username: (prof && prof.username) || uname, role: (prof && prof.role) || role };
+  $("loginPass").value = "";
+  subscribeRealtime(sb);
+  toast("Xin chào, " + state.me.username + "! Dữ liệu đồng bộ trực tiếp.", "ok");
+  await enterApp();
+}
 
 async function doLogin() {
   const name = $("loginUser").value.trim();
@@ -172,30 +153,35 @@ async function doLogin() {
   const err = $("loginErr");
   err.textContent = "";
   if (!name || !pass) { err.textContent = "Nhập tên đăng nhập và mật khẩu."; return; }
-  const user = findUserByName(name);
-  if (!user) { err.textContent = "Sai tên đăng nhập hoặc mật khẩu."; return; }
-  const h = await pwHash(pass, user.salt);
-  if (h !== user.passHash) { err.textContent = "Sai tên đăng nhập hoặc mật khẩu."; return; }
-  setSession({ userId: user.id, ts: Date.now() });
-  if (!getSession()) {
-    err.textContent = "Trình duyệt đang chặn lưu trữ (localStorage) nên không giữ được đăng nhập. Hãy cho phép site data cho trang này rồi tải lại.";
-    return;
+  let sb;
+  try { sb = await ensureSupa(); }
+  catch (e) { err.textContent = e.message; return; }
+  err.textContent = "Đang đăng nhập…";
+  try {
+    const { data, error } = await sb.auth.signInWithPassword({ email: emailOf(name), password: pass });
+    if (error || !data.user) { err.textContent = "Sai tên đăng nhập hoặc mật khẩu."; return; }
+    err.textContent = "";
+    await afterAuth(sb, data.user);
+  } catch (e) {
+    err.textContent = "Không kết nối được máy chủ: " + (e.message || e);
   }
-  $("loginPass").value = "";
-  toast("Xin chào, " + user.username + "!", "ok");
-  enterApp();
 }
 function doLogout() {
-  stopScan();
-  setSession(null);
+  try { stopScan(); } catch (e) {}
+  try {
+    if (supa) {
+      if (rtChannel) { supa.removeChannel(rtChannel); rtChannel = null; }
+      supa.auth.signOut().catch(() => {});
+    }
+  } catch (e) {}
   state.me = null;
+  state.records = [];
   $("viewApp").classList.add("hidden");
   $("viewLogin").classList.remove("hidden");
   $("loginUser").value = "";
   $("loginErr").textContent = "";
 }
-function enterApp() {
-  state.me = currentUser();
+async function enterApp() {
   if (!state.me) { doLogout(); return; }
   $("viewLogin").classList.add("hidden");
   $("viewApp").classList.remove("hidden");
@@ -203,15 +189,34 @@ function enterApp() {
   const rc = $("chipRole");
   rc.textContent = state.me.role === "admin" ? "Quản trị" : "Nhân viên";
   rc.className = "role " + state.me.role;
-  $("chgName").value = state.me.username;
   const admin = isAdmin();
   $("adminPanel").classList.toggle("hidden", !admin);
   $("btnClear").innerHTML = admin ? "🗑 Xóa tất cả" : "🗑 Xóa bản ghi của tôi";
   $("dataHint").textContent = admin
-    ? "Bạn đang xem toàn bộ bản ghi của mọi tài khoản. Xuất CSV để mở bằng Excel."
-    : "Bạn chỉ xem được các mã do chính mình quét. Dữ liệu lưu trong trình duyệt, tắt trang vẫn còn.";
+    ? "Bạn đang xem toàn bộ bản ghi của mọi tài khoản — đồng bộ trực tiếp, không cần tải lại trang."
+    : "Bạn chỉ xem được các mã do chính mình quét. Dữ liệu đồng bộ lên máy chủ chung.";
   state.page = 0;
-  renderHead(); renderUsers(); renderAll();
+  renderHead();
+  try {
+    await loadRecords();
+    if (admin) await loadAccounts();
+  } catch (e) {
+    toast("Không tải được dữ liệu: " + (e.message || e), "err");
+  }
+}
+
+/* ---------------- realtime: tự cập nhật khi máy khác quét ---------------- */
+function subscribeRealtime(sb) {
+  try {
+    if (rtChannel) sb.removeChannel(rtChannel);
+    rtChannel = sb.channel("quetdoc-records")
+      .on("postgres_changes", { event: "*", schema: "public", table: "records" }, () => scheduleReload())
+      .subscribe();
+  } catch (e) {}
+}
+function scheduleReload() {
+  clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => { loadRecords().catch(() => {}); }, 600);
 }
 
 /* ---------------- modal ---------------- */
@@ -227,9 +232,27 @@ function openModal(title, bodyHTML, okLabel, onOk) {
 }
 function closeModal() { $("modal").classList.add("hidden"); modalOkFn = null; }
 
-/* ---------------- records ---------------- */
-function addRecord(content, format) {
-  if (!state.me) { toast("Bạn cần đăng nhập để quét.", "err"); return; }
+/* ---------------- records (Supabase - dữ liệu chung đa thiết bị) ---------------- */
+const rowToRec = (r) => ({
+  id: r.id, content: r.content, format: r.format || "QR",
+  scannedAt: r.scanned_at, session: r.session || "", note: r.note || "",
+  userId: r.user_id, username: r.username || "",
+});
+
+async function loadRecords() {
+  if (!supa || !state.me) return;
+  const { data, error } = await supa.from("records")
+    .select("id,content,format,session,note,user_id,username,scanned_at")
+    .order("scanned_at", { ascending: false })
+    .limit(500);
+  if (error) throw error;
+  state.records = (data || []).map(rowToRec);
+  state.page = 0;
+  renderAll();
+}
+
+async function addRecord(content, format) {
+  if (!state.me || !supa) { toast("Bạn cần đăng nhập để quét.", "err"); return; }
   content = String(content || "").trim();
   if (!content) { toast("Mã quét rỗng, bỏ qua.", "warn"); return; }
 
@@ -240,59 +263,92 @@ function addRecord(content, format) {
   const box = $("lastscan");
   box.classList.remove("show"); void box.offsetWidth;
 
-  const dup = state.records.find((r) => norm(r.content) === norm(content));
-  if (dup) {
-    // Mã trùng: KHÔNG ghi nhận, chỉ cảnh báo
+  const showDup = (dup) => {
     state.dupSkipped = (state.dupSkipped || 0) + 1;
     saveStore(); renderStats();
     box.classList.add("dup");
     box.innerHTML = "⚠️ <b>Đã được quét</b> — mã này đã ghi nhận trước đó nên bỏ qua.<br>" +
-      "<code>" + esc(content) + "</code><br><span class='muted'>Ghi nhận lần đầu: " + fmtTime(dup.scannedAt) + "</span>";
+      "<code>" + esc(content) + "</code><br><span class='muted'>" +
+      (dup ? "Ghi nhận lần đầu: " + fmtTime(dup.scannedAt) + (dup.username ? " · bởi <b>" + esc(dup.username) + "</b>" : "")
+           : "Máy chủ đã có mã này.") + "</span>";
     box.classList.add("show");
     beepDup();
     toast("Đã được quét — bỏ qua mã trùng.", "warn");
-    return;
-  }
+  };
 
-  const rec = {
-    id: uid(),
+  // kiểm tra nhanh trên bản sao local trước
+  const dupLocal = state.records.find((r) => norm(r.content) === norm(content));
+  if (dupLocal) { showDup(dupLocal); return; }
+
+  box.classList.remove("dup");
+  box.innerHTML = "⏳ <b>Đang ghi nhận…</b><br><code>" + esc(content) + "</code>";
+  box.classList.add("show");
+
+  const { data, error } = await supa.from("records").insert({
     content,
     format: format || "QR",
-    scannedAt: new Date().toISOString(),
     session: state.settings.session.trim(),
     note: state.settings.note.trim(),
-    userId: state.me.id,
+    user_id: state.me.id,
     username: state.me.username,
-  };
+  }).select("id,content,format,session,note,user_id,username,scanned_at").single();
+
+  if (error) {
+    // 23505 = unique index records_content_uniq: máy khác đã quét mã này trước
+    if (error.code === "23505" || error.status === 409) {
+      try { await loadRecords(); } catch (e) {}
+      showDup(state.records.find((r) => norm(r.content) === norm(content)) || null);
+      return;
+    }
+    box.classList.remove("show");
+    toast("Lỗi ghi nhận: " + (error.message || "không rõ"), "err");
+    return;
+  }
+  const rec = rowToRec(data);
   state.records.unshift(rec);
   state.page = 0;
-  saveStore(); renderAll();
-
+  renderAll();
   box.classList.remove("dup");
   box.innerHTML = "✅ <b>Đã ghi nhận:</b><br>" +
     "<code>" + esc(content) + "</code><br><span class='muted'>" + esc(rec.format) + " · " + fmtTime(rec.scannedAt) + "</span>";
   box.classList.add("show");
   beep(true);
-  toast("Đã ghi nhận mã mới.", "ok");
+  toast("Đã ghi nhận mã mới (đồng bộ).", "ok");
 }
 
 function deleteRecord(id) {
   const rec = state.records.find((r) => r.id === id);
   if (!rec) return;
   if (!isAdmin() && rec.userId !== state.me.id) { toast("Bạn chỉ được xóa bản ghi của mình.", "err"); return; }
-  state.records = state.records.filter((r) => r.id !== id);
-  saveStore(); renderAll();
-  toast("Đã xóa bản ghi.", "ok");
+  openModal("Xóa bản ghi",
+    "<p>Xóa mã <code>" + esc(rec.content) + "</code> khỏi dữ liệu chung?</p>",
+    "Xóa", async () => {
+      const { error } = await supa.from("records").delete().eq("id", id);
+      closeModal();
+      if (error) { toast("Lỗi xóa: " + error.message, "err"); return; }
+      state.records = state.records.filter((r) => r.id !== id);
+      renderAll();
+      toast("Đã xóa bản ghi.", "ok");
+    });
 }
 function clearAll() {
   const mine = visibleRecords();
   if (!mine.length) return;
   const label = isAdmin() ? "toàn bộ " + state.records.length + " bản ghi của mọi tài khoản"
                           : mine.length + " bản ghi của bạn";
-  openModal("Xóa dữ liệu", "<p>Xóa " + esc(label) + "? Hành động này không thể hoàn tác.</p>", "Xóa", () => {
-    state.records = isAdmin() ? [] : state.records.filter((r) => r.userId !== state.me.id);
+  openModal("Xóa dữ liệu", "<p>Xóa " + esc(label) + "? Hành động này không thể hoàn tác.</p>", "Xóa", async () => {
+    let error = null;
+    if (isAdmin()) {
+      const r = await supa.from("records").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      error = r.error;
+    } else {
+      const r = await supa.from("records").delete().eq("user_id", state.me.id);
+      error = r.error;
+    }
+    closeModal();
+    if (error) { toast("Lỗi xóa: " + error.message, "err"); return; }
     state.page = 0;
-    saveStore(); renderAll(); closeModal();
+    try { await loadRecords(); } catch (e) {}
     toast("Đã xóa dữ liệu.", "ok");
   });
 }
@@ -328,8 +384,6 @@ function stats() {
 }
 
 function renderAll() {
-  // nếu tài khoản bị xóa khi đang đăng nhập -> đăng xuất
-  state.me = currentUser();
   if (!state.me) { doLogout(); return; }
   renderStats(); renderTable();
   const n = visibleRecords().length;
@@ -386,114 +440,37 @@ function renderTable() {
   $("btnNext").disabled = state.page >= pages - 1;
 }
 
-/* ---------------- quản lý tài khoản (admin) ---------------- */
-function renderUsers() {
-  if (!isAdmin()) return;
-  const users = getUsers();
-  const counts = {};
-  state.records.forEach((r) => { if (r.userId) counts[r.userId] = (counts[r.userId] || 0) + 1; });
-  $("usersBody").innerHTML = users.map((u) =>
-    "<tr><td><b>" + esc(u.username) + "</b>" +
-      (state.me && u.id === state.me.id ? " <span class='badge new'>bạn</span>" : "") + "</td>" +
-    "<td>" + (u.role === "admin" ? "<span class='role admin'>Quản trị</span>" : "<span class='role user'>Nhân viên</span>") + "</td>" +
-    "<td class='muted'>" + fmtTime(u.createdAt) + "</td>" +
-    "<td class='muted'>" + (counts[u.id] || 0) + "</td>" +
-    "<td style='white-space:nowrap'><button class='small' data-pw='" + u.id + "'>Đổi MK</button> " +
-    "<button class='small danger' data-deluser='" + u.id + "'>Xóa</button></td></tr>"
-  ).join("");
-  $("usersBody").querySelectorAll("[data-pw]").forEach((b) =>
-    b.addEventListener("click", () => adminResetPw(b.getAttribute("data-pw"))));
-  $("usersBody").querySelectorAll("[data-deluser]").forEach((b) =>
-    b.addEventListener("click", () => adminDeleteUser(b.getAttribute("data-deluser"))));
-}
-
-async function adminAddUser() {
-  const name = $("newUserName").value.trim();
-  let pass = $("newUserPass").value;
-  const role = $("newUserRole").value === "admin" ? "admin" : "user";
-  if (name.length < 3) { toast("Tên đăng nhập phải từ 3 ký tự trở lên.", "warn"); return; }
-  if (!/^[a-zA-Z0-9_.-]+$/.test(name)) { toast("Tên đăng nhập chỉ gồm chữ, số, dấu . _ -", "warn"); return; }
-  if (findUserByName(name)) { toast("Tên đăng nhập đã tồn tại.", "err"); return; }
-  if (!pass) pass = "123456";
-  if (pass.length < 4) { toast("Mật khẩu phải từ 4 ký tự trở lên.", "warn"); return; }
-  const salt = makeSalt();
-  const users = getUsers();
-  users.push({ id: uid(), username: name, salt, passHash: await pwHash(pass, salt), role, createdAt: new Date().toISOString() });
-  saveUsers(users);
-  $("newUserName").value = ""; $("newUserPass").value = "";
-  renderUsers();
-  toast("Đã thêm tài khoản " + name + ".", "ok");
-}
-
-function adminResetPw(userId) {
-  const users = getUsers();
-  const u = users.find((x) => x.id === userId);
-  if (!u) return;
-  openModal("Đặt lại mật khẩu",
-    "<p>Đặt mật khẩu mới cho tài khoản <b>" + esc(u.username) + "</b>:</p>" +
-    "<div class='field'><label for='mNewPass'>Mật khẩu mới</label>" +
-    "<input type='password' id='mNewPass' placeholder='Tối thiểu 4 ký tự'></div>",
-    "Lưu mật khẩu", async () => {
-      const p = $("mNewPass").value;
-      if (p.length < 4) { toast("Mật khẩu phải từ 4 ký tự trở lên.", "warn"); return; }
-      const salt = makeSalt();
-      u.salt = salt; u.passHash = await pwHash(p, salt);
-      saveUsers(users); closeModal(); renderUsers();
-      toast("Đã đổi mật khẩu cho " + u.username + ".", "ok");
-    });
-}
-
-function adminDeleteUser(userId) {
-  const users = getUsers();
-  const u = users.find((x) => x.id === userId);
-  if (!u) return;
-  if (u.id === state.me.id) { toast("Không thể xóa chính tài khoản đang đăng nhập.", "err"); return; }
-  if (u.role === "admin" && users.filter((x) => x.role === "admin").length <= 1) {
-    toast("Không thể xóa quản trị viên cuối cùng.", "err"); return;
+/* ---------------- danh sách tài khoản (admin xem) ----------------
+ * Thêm/xóa/đặt lại mật khẩu thực hiện trong Supabase Dashboard → Authentication
+ * để đảm bảo an toàn (cần service_role key, không thể làm từ frontend). */
+async function loadAccounts() {
+  if (!isAdmin() || !supa) return;
+  const body = $("usersBody");
+  try {
+    const { data, error } = await supa.from("profiles").select("id,username,role,created_at").order("username");
+    if (error) throw error;
+    const counts = {};
+    state.records.forEach((r) => { if (r.userId) counts[r.userId] = (counts[r.userId] || 0) + 1; });
+    body.innerHTML = (data || []).map((u) =>
+      "<tr><td><b>" + esc(u.username) + "</b>" +
+        (state.me && u.id === state.me.id ? " <span class='badge new'>bạn</span>" : "") + "</td>" +
+      "<td>" + (u.role === "admin" ? "<span class='role admin'>Quản trị</span>" : "<span class='role user'>Nhân viên</span>") + "</td>" +
+      "<td class='muted'>" + fmtTime(u.created_at) + "</td>" +
+      "<td class='muted'>" + (counts[u.id] || 0) + "</td></tr>"
+    ).join("");
+  } catch (e) {
+    body.innerHTML = "<tr><td colspan='4' class='muted'>Không tải được danh sách tài khoản.</td></tr>";
   }
-  const n = state.records.filter((r) => r.userId === u.id).length;
-  openModal("Xóa tài khoản",
-    "<p>Xóa tài khoản <b>" + esc(u.username) + "</b>?" +
-    (n ? " (" + n + " bản ghi của tài khoản này sẽ được giữ lại cho admin xem.)" : "") + "</p>",
-    "Xóa tài khoản", () => {
-      saveUsers(users.filter((x) => x.id !== userId));
-      closeModal(); renderUsers();
-      toast("Đã xóa tài khoản " + u.username + ".", "ok");
-    });
 }
 
 /* ---------------- tài khoản của tôi ---------------- */
-async function changeMyName() {
-  const name = $("chgName").value.trim();
-  if (name.length < 3) { toast("Tên đăng nhập phải từ 3 ký tự trở lên.", "warn"); return; }
-  if (!/^[a-zA-Z0-9_.-]+$/.test(name)) { toast("Tên đăng nhập chỉ gồm chữ, số, dấu . _ -", "warn"); return; }
-  const other = findUserByName(name);
-  if (other && other.id !== state.me.id) { toast("Tên đăng nhập đã tồn tại.", "err"); return; }
-  const users = getUsers();
-  const u = users.find((x) => x.id === state.me.id);
-  if (!u) return;
-  u.username = name;
-  saveUsers(users);
-  state.me = currentUser();
-  $("chipName").textContent = state.me.username;
-  // cập nhật tên hiển thị trên các bản ghi của mình
-  state.records.forEach((r) => { if (r.userId === u.id) r.username = name; });
-  saveStore(); renderTable();
-  toast("Đã đổi tên đăng nhập thành " + name + ".", "ok");
-}
-
 async function changeMyPassword() {
-  const oldP = $("oldPass").value, p1 = $("newPass").value, p2 = $("newPass2").value;
-  const users = getUsers();
-  const u = users.find((x) => x.id === state.me.id);
-  if (!u) return;
-  if ((await pwHash(oldP, u.salt)) !== u.passHash) { toast("Mật khẩu hiện tại không đúng.", "err"); return; }
+  const p1 = $("newPass").value, p2 = $("newPass2").value;
   if (p1.length < 4) { toast("Mật khẩu mới phải từ 4 ký tự trở lên.", "warn"); return; }
   if (p1 !== p2) { toast("Nhập lại mật khẩu mới chưa khớp.", "warn"); return; }
-  const salt = makeSalt();
-  u.salt = salt; u.passHash = await pwHash(p1, salt);
-  saveUsers(users);
-  $("oldPass").value = $("newPass").value = $("newPass2").value = "";
+  const { error } = await supa.auth.updateUser({ password: p1 });
+  if (error) { toast("Lỗi đổi mật khẩu: " + error.message, "err"); return; }
+  $("newPass").value = $("newPass2").value = "";
   toast("Đã đổi mật khẩu.", "ok");
 }
 
@@ -675,8 +652,6 @@ function bindEvents() {
   $("btnExportJson").addEventListener("click", exportJSON);
   $("btnClear").addEventListener("click", clearAll);
 
-  $("btnAddUser").addEventListener("click", adminAddUser);
-  $("btnChgName").addEventListener("click", changeMyName);
   $("btnChgPass").addEventListener("click", changeMyPassword);
 
   $("modalCancel").addEventListener("click", closeModal);
@@ -688,16 +663,8 @@ function bindEvents() {
 
 /* ---------------- init ---------------- */
 async function init() {
-  // CHỐNG TRANG ĐEN: hiện màn hình đăng nhập NGAY LẬP TỨC, trước mọi tác vụ
-  // async/storage có thể lỗi. Dù phía sau có sự cố gì, người dùng vẫn thấy giao diện.
+  // login hiện sẵn mặc định trong HTML (chống trang đen)
   try {
-    if (!currentUser()) $("viewLogin").classList.remove("hidden");
-  } catch (e) {
-    try { $("viewLogin").classList.remove("hidden"); } catch (e2) {}
-  }
-
-  try {
-    await seedUsers();
     loadStore();
     $("sessionInput").value = state.settings.session || "";
     $("noteInput").value = state.settings.note || "";
@@ -705,23 +672,24 @@ async function init() {
     setHttpsChip();
     setCamStatus("⚪ Camera đang tắt", "");
     bindEvents();
-    if (currentUser()) enterApp();
-    // (không có session: màn hình đăng nhập đã hiện sẵn ở trên)
     listCameras();
     if (!("mediaDevices" in navigator)) {
       toast("Trình duyệt không hỗ trợ camera. Bạn vẫn có thể nhập tay hoặc quét từ ảnh.", "warn");
     }
+    // kết nối máy chủ + tự đăng nhập lại nếu còn phiên
+    const sb = await ensureSupa();
+    sb.auth.onAuthStateChange((event) => { if (event === "SIGNED_OUT") doLogout(); });
+    const { data: { session } } = await sb.auth.getSession();
+    if (session && session.user) {
+      await afterAuth(sb, session.user);
+    }
     if (!storageOK) {
-      const msg = "Trình duyệt đang chặn lưu trữ cục bộ — dữ liệu quét sẽ KHÔNG được lưu. Hãy cho phép site data/cookie cho trang này rồi tải lại.";
-      toast("⚠️ " + msg, "err");
-      const le = $("loginErr");
-      if (le) le.textContent = msg;
+      toast("⚠️ Trình duyệt đang chặn lưu trữ cục bộ — phiên đăng nhập có thể không được giữ. Hãy cho phép site data cho trang này.", "err");
     }
   } catch (e) {
     console.error("Lỗi khởi tạo:", e);
-    try { $("viewLogin").classList.remove("hidden"); } catch (e2) {}
     const le = $("loginErr");
-    if (le) le.textContent = "Không khởi tạo được ứng dụng: " + (e && e.message ? e.message : e);
+    if (le && !le.textContent) le.textContent = "Không kết nối được máy chủ: " + (e && e.message ? e.message : e);
   }
 }
 

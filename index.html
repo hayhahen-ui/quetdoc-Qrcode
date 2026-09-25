@@ -6,8 +6,9 @@
 <meta name="theme-color" content="#0A0D14">
 <meta name="description" content="QuetDoc QRcode — Quét mã QR/barcode bằng camera và ghi nhận dữ liệu, phân quyền quản trị / nhân viên.">
 <title>QuetDoc QRcode · Quét mã & ghi nhận dữ liệu</title>
-<link rel="stylesheet" href="assets/css/styles.css?v=2.2">
+<link rel="stylesheet" href="assets/css/styles.css?v=3.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" async></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" async></script>
 </head>
 <body>
 <noscript><div class="noscript-warn">⚠️ Trình duyệt của bạn đang <b>tắt JavaScript</b> nên app không chạy được. Hãy bật JavaScript cho trang này (hoặc dùng trình duyệt khác/điện thoại).</div></noscript>
@@ -145,65 +146,31 @@
   <!-- ============ QUẢN LÝ TÀI KHOẢN (ADMIN) ============ -->
   <section class="card pad hidden" id="adminPanel" style="margin-top:12px">
     <h2 class="sec-title">🛡 Quản lý tài khoản <span class="muted" style="font-weight:400">(chỉ quản trị viên)</span></h2>
-    <p class="sec-hint">Xem, thêm, xóa tài khoản và đặt lại mật khẩu cho nhân viên.</p>
-    <div class="rowflex">
-      <div class="field inline">
-        <label for="newUserName">Tên đăng nhập mới</label>
-        <input type="text" id="newUserName" placeholder="VD: user6">
-      </div>
-      <div class="field inline">
-        <label for="newUserPass">Mật khẩu</label>
-        <input type="password" id="newUserPass" placeholder="Để trống = 123456">
-      </div>
-      <div class="field inline" style="max-width:150px;flex:0 1 150px">
-        <label for="newUserRole">Vai trò</label>
-        <select id="newUserRole">
-          <option value="user">Nhân viên</option>
-          <option value="admin">Quản trị</option>
-        </select>
-      </div>
-      <button id="btnAddUser">＋ Thêm tài khoản</button>
-    </div>
+    <p class="sec-hint">Danh sách tài khoản (chỉ xem). Thêm / xóa / đặt lại mật khẩu: thực hiện trong <b>Supabase Dashboard → Authentication → Users</b>.</p>
     <div style="overflow-x:auto;margin-top:12px">
       <table>
-        <thead><tr><th>Tên đăng nhập</th><th>Vai trò</th><th>Ngày tạo</th><th>Số bản ghi</th><th></th></tr></thead>
+        <thead><tr><th>Tên đăng nhập</th><th>Vai trò</th><th>Ngày tạo</th><th>Số bản ghi</th></tr></thead>
         <tbody id="usersBody"></tbody>
       </table>
     </div>
+    <p class="sec-hint" style="margin-top:10px">🔄 Dữ liệu đồng bộ trực tiếp: bản ghi mới từ các máy sẽ tự hiện mà không cần tải lại trang.</p>
   </section>
 
   <!-- ============ TÀI KHOẢN CỦA TÔI ============ -->
   <section class="card pad" style="margin-top:12px">
     <h2 class="sec-title">👤 Tài khoản của tôi</h2>
-    <p class="sec-hint">Đổi tên đăng nhập và mật khẩu của chính bạn.</p>
-    <div class="grid2">
-      <div>
-        <div class="rowflex">
-          <div class="field inline">
-            <label for="chgName">Tên đăng nhập</label>
-            <input type="text" id="chgName" placeholder="Tên đăng nhập mới">
-          </div>
-          <button id="btnChgName">Lưu tên</button>
-        </div>
+    <p class="sec-hint">Đổi mật khẩu đăng nhập của chính bạn.</p>
+    <div class="rowflex">
+      <div class="field inline">
+        <label for="newPass">Mật khẩu mới</label>
+        <input type="password" id="newPass" autocomplete="new-password">
       </div>
-      <div>
-        <div class="field" style="margin-top:0">
-          <label for="oldPass">Mật khẩu hiện tại</label>
-          <input type="password" id="oldPass" autocomplete="current-password">
-        </div>
-        <div class="rowflex">
-          <div class="field inline">
-            <label for="newPass">Mật khẩu mới</label>
-            <input type="password" id="newPass" autocomplete="new-password">
-          </div>
-          <div class="field inline">
-            <label for="newPass2">Nhập lại mật khẩu mới</label>
-            <input type="password" id="newPass2" autocomplete="new-password">
-          </div>
-        </div>
-        <button id="btnChgPass" style="margin-top:10px">Đổi mật khẩu</button>
+      <div class="field inline">
+        <label for="newPass2">Nhập lại mật khẩu mới</label>
+        <input type="password" id="newPass2" autocomplete="new-password">
       </div>
     </div>
+    <button id="btnChgPass" style="margin-top:10px">Đổi mật khẩu</button>
   </section>
 
   <footer>
@@ -226,6 +193,6 @@
 </div>
 
 <div id="toasts"></div>
-<script src="assets/js/app.js?v=2.2" defer></script>
+<script src="assets/js/app.js?v=3.0" defer></script>
 </body>
 </html>
