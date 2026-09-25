@@ -7,7 +7,7 @@ Quét mã **QR / barcode** bằng camera và **ghi nhận dữ liệu** (nội d
 
 | Tài khoản | Mật khẩu | Quyền |
 |---|---|---|
-| `admin` | `admin` | Xem mọi bản ghi (trực tiếp), xóa bản ghi, xóa toàn bộ dữ liệu, xem danh sách tài khoản |
+| `admin` | `admin123` | Xem mọi bản ghi (trực tiếp), xóa bản ghi, xóa toàn bộ dữ liệu, xem danh sách tài khoản |
 | `user1` … `user5` | `123456` | Chỉ quét, chỉ xem bản ghi của mình, đổi mật khẩu |
 
 > Email nội bộ: `user1` → `user1@quetdoc.local` (tự ánh xạ trong app, người dùng vẫn gõ tên ngắn).
@@ -37,7 +37,8 @@ Quét mã **QR / barcode** bằng camera và **ghi nhận dữ liệu** (nội d
 2. **SQL Editor** → New query → chạy SQL tạo bảng `profiles`, `records`, unique index
    chống trùng, realtime và các RLS policy (xem `docs/supabase-setup.sql`).
 3. **Authentication** → **Users** → Add user (bật **Auto Confirm user**):
-   `admin@quetdoc.local` / `admin`, `user1@quetdoc.local` / `123456` … `user5@quetdoc.local` / `123456`.
+   `admin@quetdoc.local` / `admin123`, `user1@quetdoc.local` / `123456` … `user5@quetdoc.local` / `123456`.
+   (Supabase yêu cầu mật khẩu tối thiểu 6 ký tự.)
 4. **Project Settings** → **API**: copy **Project URL** và **anon public key**
    → dán vào `SUPABASE_URL` / `SUPABASE_ANON_KEY` ở đầu `assets/js/app.js`.
 

@@ -466,7 +466,7 @@ async function loadAccounts() {
 /* ---------------- tài khoản của tôi ---------------- */
 async function changeMyPassword() {
   const p1 = $("newPass").value, p2 = $("newPass2").value;
-  if (p1.length < 4) { toast("Mật khẩu mới phải từ 4 ký tự trở lên.", "warn"); return; }
+  if (p1.length < 6) { toast("Mật khẩu mới phải từ 6 ký tự trở lên (theo yêu cầu của Supabase).", "warn"); return; }
   if (p1 !== p2) { toast("Nhập lại mật khẩu mới chưa khớp.", "warn"); return; }
   const { error } = await supa.auth.updateUser({ password: p1 });
   if (error) { toast("Lỗi đổi mật khẩu: " + error.message, "err"); return; }
