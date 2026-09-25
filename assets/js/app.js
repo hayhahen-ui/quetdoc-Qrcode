@@ -2089,6 +2089,53 @@ function forceInlineVideo() {
 function videoHasPicture(v) {
   return !!(v && v.videoWidth > 0 && !v.paused && v.readyState >= 2);
 }
+// Chuỗi chẩn đoán ngắn gọn — hiện cố định trong khung quét để user chụp màn hình gửi về
+function videoDiag() {
+  try {
+    const v = document.querySelector("#reader video");
+    if (!v) return "khong-co-the-video";
+    let t = "khong-co-track";
+    try {
+      const tr = v.srcObject ? v.srcObject.getVideoTracks()[0] : null;
+      if (tr) {
+        let extra = "";
+        try { const s = tr.getSettings ? tr.getSettings() : {}; extra = " facing=" + (s.facingMode || "?"); } catch (e) {}
+        t = "track:" + tr.readyState + (tr.muted ? ":MUTED" : ":live") + extra;
+      }
+    } catch (e) {}
+    return "video:rs=" + v.readyState + ",w=" + v.videoWidth + (v.paused ? ",paused" : ",playing") + " | " + t;
+  } catch (e) { return "loi-doc:" + (e && e.message); }
+}
+// Gắn playsinline/muted NGAY khi html5-qrcode tạo thẻ <video> (MutationObserver).
+// Gắn sau khi thư viện đã gọi play() thì iPhone đã kịp quyết định fullscreen -> đen.
+let videoObserver = null;
+function fixVideoEl(v) {
+  if (!v || v.tagName !== "VIDEO") return;
+  v.setAttribute("playsinline", "");
+  v.setAttribute("webkit-playsinline", "");
+  v.setAttribute("muted", "");
+  try { v.muted = true; } catch (e) {}
+}
+function watchVideoElement() {
+  stopWatchVideoElement();
+  try {
+    const root = document.getElementById("reader");
+    if (!root || typeof MutationObserver === "undefined") return;
+    root.querySelectorAll("video").forEach(fixVideoEl);
+    videoObserver = new MutationObserver((muts) => {
+      muts.forEach((m) => (m.addedNodes || []).forEach((n) => {
+        if (!n || !n.tagName) return;
+        if (n.tagName === "VIDEO") fixVideoEl(n);
+        else if (n.querySelectorAll) n.querySelectorAll("video").forEach(fixVideoEl);
+      }));
+    });
+    videoObserver.observe(root, { childList: true, subtree: true });
+  } catch (e) {}
+}
+function stopWatchVideoElement() {
+  try { if (videoObserver) videoObserver.disconnect(); } catch (e) {}
+  videoObserver = null;
+}
 async function startScan() {
   if (state.scanning) return;
   if (!sessionStatus().ok) { // v5.3: bắt buộc nhập đủ phiên quét
@@ -2110,6 +2157,7 @@ async function startScan() {
 
   $("reader").innerHTML = "";
   html5Qr = new Html5Qrcode("reader");
+  watchVideoElement(); // v6.4: gắn playsinline ngay khi thư viện tạo thẻ video
   setCamStatus("⏳ Đang mở camera…", "");
   try {
     await html5Qr.start(
@@ -2133,17 +2181,31 @@ async function startScan() {
     );
     state.scanning = true;
     forceInlineVideo(); // v6.3: iPhone thiếu playsinline sẽ chỉ thấy màn hình đen
-    // v6.3: watchdog — 6s sau nếu video vẫn đen (hay gặp trên iOS / webview Zalo-FB
-    // bị chặn camera) thì dừng và báo rõ cách sửa thay vì để khung đen treo máy.
+    // v6.4: watchdog — 6s sau nếu video vẫn đen thì thử cứu 1 lần (pause -> gắn lại
+    // playsinline -> play -> chờ 2.5s); vẫn đen -> dừng và hiện bảng chẩn đoán cố
+    // định trong khung quét để user chụp màn hình gửi về (toast chỉ hiện 3s).
     clearTimeout(state.videoWatch);
-    state.videoWatch = setTimeout(() => {
+    state.videoWatch = setTimeout(async () => {
       if (!state.scanning) return;
-      let v = null;
-      try { v = document.querySelector("#reader video"); } catch (e) {}
-      if (!videoHasPicture(v)) {
-        stopScan();
-        setCamStatus("🔴 Camera không lên hình", "warn");
-        toast("Không lấy được hình camera (khung đen). Trên iPhone làm 3 bước: 1) Mở trang bằng Safari — đừng mở trong Zalo/Facebook (bấm ••• → Mở bằng Safari); 2) Cài đặt iPhone → Safari → Camera → Cho phép; 3) Tải lại trang, bấm Bắt đầu quét và chọn Cho phép khi được hỏi.", "err");
+      const pic = () => { try { return document.querySelector("#reader video"); } catch (e) { return null; } };
+      if (!videoHasPicture(pic())) {
+        try { pic().pause(); } catch (e) {}
+        forceInlineVideo();
+        await new Promise((r) => setTimeout(r, 2500));
+        if (state.scanning && !videoHasPicture(pic())) {
+          const diag = videoDiag();
+          stopScan();
+          setCamStatus("🔴 Camera không lên hình", "warn");
+          $("reader").innerHTML =
+            '<div class="camdiag"><b>🔴 Không lấy được hình camera</b>' +
+            '<code>' + esc(diag) + '</code>' +
+            '<p>Trên iPhone, camera qua trình duyệt ổn định nhất với <b>Safari</b>. ' +
+            'Hãy mở Safari và vào <b>' + esc(location.host) + '</b> rồi quét lại.</p>' +
+            '<p>Nếu Safari vẫn đen: Cài đặt iPhone → Safari → Camera → <b>Cho phép</b>, ' +
+            'tải lại trang, bấm <b>Bắt đầu quét</b> và chọn <b>Cho phép</b> khi được hỏi.</p>' +
+            '<button class="small" id="btnDiagRetry">↻ Thử lại</button></div>';
+          $("btnDiagRetry").addEventListener("click", startScan);
+        }
       }
     }, 6000);
     ensureOCR().catch(() => {}); // v4.8: tải trước thư viện OCR khi mở camera để quét đầu không phải chờ
@@ -2167,6 +2229,7 @@ async function startScan() {
     }
     listCameras();
   } catch (e) {
+    stopWatchVideoElement();
     setCamStatus("🔴 Không mở được camera", "warn");
     toast("Không mở được camera: " + (e && e.message ? e.message : e) + ". Hãy cấp quyền camera hoặc dùng HTTPS.", "err");
   }
@@ -2174,6 +2237,7 @@ async function startScan() {
 async function stopScan() {
   if (!state.scanning || !html5Qr) return;
   clearTimeout(state.videoWatch); // v6.3: hủy watchdog kiểm tra video
+  stopWatchVideoElement(); // v6.4: gỡ observer gắn playsinline
   try { await html5Qr.stop(); } catch (e) {}
   try { html5Qr.clear(); } catch (e) {}
   state.scanning = false; state.torchOn = false; state.realFacing = "";

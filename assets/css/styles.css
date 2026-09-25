@@ -243,3 +243,11 @@ td.editable:hover{background:rgba(245,158,11,.14)}
 /* Logo đăng nhập lớn hơn */
 .login-card .logo.big{width:64px;height:64px;font-size:30px;border-radius:18px}
 .login-card h1{font-size:22px}
+
+/* ============ v6.4: bảng chẩn đoán camera (hiện cố định trong khung quét) ============ */
+.camdiag{padding:18px 16px;display:flex;flex-direction:column;gap:10px;font-size:14px}
+.camdiag b{font-size:15px}
+.camdiag code{display:block;background:#0B0E13;border:1px solid var(--border);border-radius:8px;
+  padding:8px 10px;font-size:12px;color:var(--amber);word-break:break-all}
+.camdiag p{margin:0;color:var(--text-dim)}
+.camdiag .small{align-self:flex-start}
