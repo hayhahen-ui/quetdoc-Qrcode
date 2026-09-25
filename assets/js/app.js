@@ -255,16 +255,50 @@ const rowToRec = (r) => ({
   chiThi: r.chi_thi || "", po: r.po || "", size: r.size || "",
 });
 
+// Cột đọc/ghi bản ghi. Server chưa chạy migration v4.0 -> tự hạ về bản cũ,
+// app vẫn quét/ghi bình thường (thiếu Chỉ thị/PO/Size cho tới khi chạy migration).
+const REC_FULL_COLS = "id,content,format,session,note,user_id,username,scanned_at,chi_thi,po,size";
+const REC_LEGACY_COLS = "id,content,format,session,note,user_id,username,scanned_at";
+let schemaV4 = true;
+
 async function loadRecords() {
   if (!supa || !state.me) return;
-  const { data, error } = await supa.from("records")
-    .select("id,content,format,session,note,user_id,username,scanned_at,chi_thi,po,size")
-    .order("scanned_at", { ascending: false })
-    .limit(500);
-  if (error) throw error;
-  state.records = (data || []).map(rowToRec);
+  const cols = schemaV4 ? REC_FULL_COLS : REC_LEGACY_COLS;
+  let q = await supa.from("records").select(cols)
+    .order("scanned_at", { ascending: false }).limit(500);
+  if (q.error && schemaV4 && /chi_thi|schema cache/i.test(q.error.message || "")) {
+    // Server chưa chạy migration v4.0 -> đọc kiểu cũ, app vẫn chạy
+    schemaV4 = false;
+    q = await supa.from("records").select(REC_LEGACY_COLS)
+      .order("scanned_at", { ascending: false }).limit(500);
+  }
+  if (q.error) throw q.error;
+  const server = (q.data || []).map(rowToRec);
+  const serverNorms = new Set(server.map((r) => norm(r.content)));
+  // Giữ lại các bản đang đồng bộ nền (pending) mà server chưa có
+  const pendings = state.records.filter((r) => r.pending && !serverNorms.has(norm(r.content)));
+  state.records = server.concat(pendings);
+  state.records.sort((a, b) => new Date(b.scannedAt) - new Date(a.scannedAt));
   state.page = 0;
   renderAll();
+}
+
+// Ghi 1 bản ghi, tự hạ cấp khi server chưa có cột v4.0 (chưa chạy migration)
+async function insertRecord(payload) {
+  const cols = schemaV4 ? REC_FULL_COLS : REC_LEGACY_COLS;
+  let body = payload;
+  if (!schemaV4) {
+    const { chi_thi, po, size, ...rest } = payload;
+    body = rest;
+  }
+  let r = await supa.from("records").insert(body).select(cols).single();
+  if (r.error && schemaV4 && /chi_thi|schema cache/i.test(r.error.message || "")) {
+    schemaV4 = false;
+    const { chi_thi, po, size, ...rest } = payload;
+    r = await supa.from("records").insert(rest).select(REC_LEGACY_COLS).single();
+    if (r.data) { r.data.chi_thi = payload.chi_thi; r.data.po = payload.po; r.data.size = payload.size; }
+  }
+  return r;
 }
 
 async function addRecord(content, format) {
@@ -276,74 +310,105 @@ async function addRecord(content, format) {
   if (content === state.lastContent && now - state.lastAt < DUP_COOLDOWN_MS) return; // chống camera quét dính 2 lần
   state.lastContent = content; state.lastAt = now;
 
-  const box = $("lastscan");
-  box.classList.remove("show"); void box.offsetWidth;
-
-  const showDup = (dup) => {
-    state.dupSkipped = (state.dupSkipped || 0) + 1;
-    saveStore(); renderStats();
-    box.classList.add("dup");
-    box.innerHTML = "⚠️ <b>Đã được quét</b> — mã này đã ghi nhận trước đó nên bỏ qua.<br>" +
-      "<code>" + esc(content) + "</code><br><span class='muted'>" +
-      (dup ? "Ghi nhận lần đầu: " + fmtTime(dup.scannedAt) + (dup.username ? " · bởi <b>" + esc(dup.username) + "</b>" : "")
-           : "Máy chủ đã có mã này.") + "</span>";
-    box.classList.add("show");
-    beepDup();
-    toast("Đã được quét — bỏ qua mã trùng.", "warn");
-  };
-
-  // kiểm tra nhanh trên bản sao local trước
+  // kiểm tra nhanh trên bản sao local trước (kể cả bản đang đồng bộ)
   const dupLocal = state.records.find((r) => norm(r.content) === norm(content));
-  if (dupLocal) { showDup(dupLocal); return; }
-
-  box.classList.remove("dup");
-  box.innerHTML = "⏳ <b>Đang ghi nhận…</b><br><code>" + esc(content) + "</code>";
-  box.classList.add("show");
+  if (dupLocal) { showDupBox(dupLocal, content); return; }
 
   // Tem thùng giày: tự tách chỉ thị từ số thùng, tra PO/Size mặc định từ danh mục
   const chiThi = parseChiThi(content);
   const dir = chiThi ? state.directives[chiThi] : null;
 
-  const { data, error } = await supa.from("records").insert({
-    content,
-    format: format || "QR",
-    session: state.settings.session.trim(),
-    note: state.settings.note.trim(),
-    user_id: state.me.id,
-    username: state.me.username,
-    chi_thi: chiThi,
-    po: dir ? dir.po : "",
-    size: dir ? dir.size : "",
-  }).select("id,content,format,session,note,user_id,username,scanned_at,chi_thi,po,size").single();
-
-  if (error) {
-    // 23505 = unique index records_content_uniq: máy khác đã quét mã này trước
-    if (error.code === "23505" || error.status === 409) {
-      try { await loadRecords(); } catch (e) {}
-      showDup(state.records.find((r) => norm(r.content) === norm(content)) || null);
-      return;
-    }
-    box.classList.remove("show");
-    toast("Lỗi ghi nhận: " + (error.message || "không rõ"), "err");
-    return;
-  }
-  const rec = rowToRec(data);
+  // Ghi nhận TỨC THÌ (optimistic): hiện lên bảng + kêu beep ngay,
+  // đồng bộ lên server ở nền để không chặn lần quét tiếp theo.
+  const tempId = "tmp_" + uid();
+  const rec = {
+    id: tempId, content, format: format || "QR",
+    scannedAt: new Date().toISOString(),
+    session: state.settings.session.trim(), note: state.settings.note.trim(),
+    userId: state.me.id, username: state.me.username,
+    chiThi, po: dir ? dir.po : "", size: dir ? dir.size : "",
+    pending: true,
+  };
   state.records.unshift(rec);
   state.page = 0;
   renderAll();
+  showOkBox(rec);
+  beep(true);
+
+  try {
+    const { data, error } = await insertRecord({
+      content,
+      format: rec.format,
+      session: rec.session,
+      note: rec.note,
+      user_id: rec.userId,
+      username: rec.username,
+      chi_thi: chiThi,
+      po: rec.po,
+      size: rec.size,
+    });
+    if (error) throw error;
+    // Thay bản tạm bằng bản server trả về (có id + giờ chuẩn)
+    const i = state.records.findIndex((r) => r.id === tempId);
+    const fresh = rowToRec(data);
+    if (i >= 0) state.records[i] = fresh; else state.records.unshift(fresh);
+    renderAll();
+  } catch (e) {
+    state.records = state.records.filter((r) => r.id !== tempId);
+    const msg = (e && e.message) || "không rõ";
+    if (e && (e.code === "23505" || e.status === 409)) {
+      // 23505 = unique index records_content_uniq: máy khác đã quét mã này trước
+      try { await loadRecords(); } catch (_) {}
+      showDupBox(state.records.find((r) => norm(r.content) === norm(content)) || null, content);
+      return;
+    }
+    renderAll();
+    showErrBox(content, msg);
+  }
+}
+
+// Banner "đã ghi nhận" — gọi ngay khi quét được, không chờ mạng
+function showOkBox(rec) {
+  const box = $("lastscan");
+  box.classList.remove("show"); void box.offsetWidth;
   box.classList.remove("dup");
   box.innerHTML = "✅ <b>Đã ghi nhận:</b><br>" +
-    "<code>" + esc(content) + "</code><br><span class='muted'>" + esc(rec.format) + " · " + fmtTime(rec.scannedAt) + "</span>" +
+    "<code>" + esc(rec.content) + "</code><br><span class='muted'>" + esc(rec.format) + " · " + fmtTime(rec.scannedAt) + "</span>" +
     (rec.chiThi ? "<br><span class='muted'>Chỉ thị <b>" + esc(rec.chiThi) + "</b>" +
       (rec.po ? " · PO " + esc(rec.po) : "") + (rec.size ? " · Size " + esc(rec.size) : "") + "</span>" : "");
   box.classList.add("show");
-  beep(true);
-  toast("Đã ghi nhận mã mới (đồng bộ).", "ok");
+  toast("Đã ghi nhận mã mới.", "ok");
+}
+
+function showDupBox(dup, content) {
+  const box = $("lastscan");
+  box.classList.remove("show"); void box.offsetWidth;
+  state.dupSkipped = (state.dupSkipped || 0) + 1;
+  saveStore(); renderStats();
+  box.classList.add("dup");
+  box.innerHTML = "⚠️ <b>Đã được quét</b> — mã này đã ghi nhận trước đó nên bỏ qua.<br>" +
+    "<code>" + esc(content) + "</code><br><span class='muted'>" +
+    (dup ? "Ghi nhận lần đầu: " + fmtTime(dup.scannedAt) + (dup.username ? " · bởi <b>" + esc(dup.username) + "</b>" : "")
+         : "Máy chủ đã có mã này.") + "</span>";
+  box.classList.add("show");
+  beepDup();
+  toast("Đã được quét — bỏ qua mã trùng.", "warn");
+}
+
+function showErrBox(content, msg) {
+  const box = $("lastscan");
+  box.classList.remove("show"); void box.offsetWidth;
+  box.classList.remove("dup");
+  box.innerHTML = "❌ <b>Lỗi ghi nhận:</b><br><code>" + esc(content) + "</code><br>" +
+    "<span class='muted'>" + esc(msg) + "</span>";
+  box.classList.add("show");
+  toast("Lỗi ghi nhận: " + msg, "err");
 }
 
 function deleteRecord(id) {
   const rec = state.records.find((r) => r.id === id);
   if (!rec) return;
+  if (rec.pending) { toast("Mã đang đồng bộ, đợi 1-2 giây rồi xóa.", "warn"); return; }
   if (!isAdmin() && rec.userId !== state.me.id) { toast("Bạn chỉ được xóa bản ghi của mình.", "err"); return; }
   openModal("Xóa bản ghi",
     "<p>Xóa mã <code>" + esc(rec.content) + "</code> khỏi dữ liệu chung?</p>",
@@ -477,6 +542,7 @@ function renderTable() {
 function beginEditCell(recId, field, td) {
   const rec = state.records.find((r) => r.id === recId);
   if (!rec) return;
+  if (rec.pending) { toast("Mã đang đồng bộ, đợi 1-2 giây rồi sửa.", "warn"); return; }
   if (!isAdmin() && rec.userId !== state.me.id) { toast("Bạn chỉ được sửa bản ghi của mình.", "err"); return; }
   const label = field === "po" ? "PO" : "Size";
   const cur = rec[field] || "";
@@ -530,6 +596,7 @@ async function loadAccounts() {
 }
 
 /* ---------------- danh mục chỉ thị (tem thùng giày, admin quản lý) ---------------- */
+let warnedNoDirectives = false;
 async function loadDirectives() {
   state.directives = {};
   if (!supa) return;
@@ -537,7 +604,14 @@ async function loadDirectives() {
     const { data, error } = await supa.from("directives").select("chi_thi,po,size").order("chi_thi");
     if (error) throw error;
     (data || []).forEach((d) => { state.directives[d.chi_thi] = { po: d.po || "", size: d.size || "" }; });
-  } catch (e) { console.warn("Không tải được danh mục chỉ thị:", e.message); }
+  } catch (e) {
+    console.warn("Không tải được danh mục chỉ thị:", e.message);
+    // Bảng chưa tồn tại = chưa chạy migration v4.0 -> nhắc admin 1 lần/phiên
+    if (isAdmin() && !warnedNoDirectives && /directives|schema cache|does not exist/i.test(e.message || "")) {
+      warnedNoDirectives = true;
+      toast("Chưa có bảng Danh mục Chỉ thị. Hãy chạy đoạn migration v4.0 trong Supabase SQL Editor.", "warn");
+    }
+  }
   if (isAdmin()) renderDirectives();
 }
 function renderDirectives() {
@@ -722,6 +796,7 @@ function setHttpsChip() {
 
 async function listCameras() {
   // Thư viện CDN nạp async nên có thể chưa sẵn sàng lúc init: đợi tối đa ~10s
+  const prev = state.cameras || [];
   state.cameras = [];
   for (let i = 0; i < 20; i++) {
     try {
@@ -729,6 +804,9 @@ async function listCameras() {
     } catch (e) { state.cameras = []; break; }
     await new Promise((r) => setTimeout(r, 500));
   }
+  // Nếu lần quét này không ra camera mà trước đó đã có -> giữ danh sách cũ
+  // (tránh dropdown báo sai "Không tìm thấy camera" khi camera vẫn mở được)
+  if (!state.cameras.length && prev.length) state.cameras = prev;
   const sel = $("cameraSelect");
   sel.innerHTML = "";
   if (!state.cameras.length) {
@@ -757,7 +835,9 @@ async function startScan() {
   if (state.scanning) return;
   if (typeof Html5Qrcode === "undefined") { toast("Chưa tải được thư viện quét mã. Kiểm tra mạng rồi tải lại trang.", "err"); return; }
   const camId = $("cameraSelect").value;
-  if (!camId && !state.cameras.length) { toast("Không tìm thấy camera trên thiết bị này.", "err"); return; }
+  // Kể cả khi liệt kê camera thất bại (dropdown trống), vẫn thử mở bằng
+  // facingMode "environment": nhiều máy liệt kê lỗi nhưng getUserMedia vẫn mở được.
+  // Nếu máy thật sự không có camera, lỗi sẽ báo rõ ở catch bên dưới.
 
   // Chọn camera: (1) user chọn tay -> deviceId exact; (2) camera sau theo tên -> deviceId exact;
   // (3) chưa đọc được tên -> facingMode environment.
