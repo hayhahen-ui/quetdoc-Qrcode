@@ -379,7 +379,8 @@ async function ensureOCR() {
     }
     return await ocrWorkerP;
   } catch (e) {
-    return null; // CDN/model lỗi -> tắt lặng lẽ, pad chọn tay vẫn dùng được
+    ocrWorkerP = null; // cho lần quét sau thử tải lại
+    return null;
   }
 }
 
@@ -402,20 +403,26 @@ function parseSizeText(text) {
   return parseFloat(m[1]).toFixed(1) + "-" + m[2];
 }
 
+function setOcrStatus(msg) {
+  const el = $("ocrStatus");
+  if (el) el.textContent = msg || "";
+}
+
 async function ocrFillSize(content) {
   const rec0 = state.records.find((r) => r.content === content);
   if (!rec0 || rec0.size) return; // pad đã có size -> không tốn OCR
   const crop = captureSizeCrop(); // chụp NGAY khung hình lúc vừa quét
-  if (!crop) return;
+  if (!crop) { setOcrStatus("🤖 không chụp được khung hình camera."); return; }
+  setOcrStatus("🤖 đang đọc size từ tem…");
   if (Object.keys(ocrPending).length > 300) { for (const k in ocrPending) delete ocrPending[k]; }
   const worker = await ensureOCR();
-  if (!worker) return;
+  if (!worker) { setOcrStatus("🤖 không tải được thư viện OCR — dùng pad chọn tay."); return; }
   let sizeStr = null;
   try {
     const { data } = await worker.recognize(crop);
     if ((data.confidence || 0) >= 45) sizeStr = parseSizeText(data.text);
-  } catch (e) { return; }
-  if (!sizeStr) return;
+  } catch (e) { setOcrStatus("🤖 lỗi khi đọc size."); return; }
+  if (!sizeStr) { setOcrStatus("🤖 không đọc được size — chọn pad hoặc bấm ô Size để sửa."); return; }
   ocrPending[content] = sizeStr;
   applyOcrSize(content);
 }
@@ -430,6 +437,7 @@ function applyOcrSize(content) {
   if (rec.size) { delete ocrPending[content]; return; } // người dùng đã chọn pad/sửa tay -> bỏ OCR
   rec.size = sizeStr;
   rec.ocrSize = true;
+  setOcrStatus("🤖 đã đọc size: " + sizeStr + " ✓");
   renderAll();
   if (!rec.pending && !String(rec.id).startsWith("tmp_") && supa && schemaV4) {
     supa.from("records").update({ size: sizeStr }).eq("id", rec.id).then(() => {}).catch(() => {});
