@@ -1024,10 +1024,11 @@ async function backfillPoFromMaster() {
 /* ---------------- v5.0: packing list (khoảng thùng -> size/số đôi) ----------------
  * File PACKING_LIST_CLP_TVS chuẩn: mỗi chỉ thị có các khoảng thùng liên tục
  * [thung_tu, thung_den], mỗi khoảng cố định 1 size + số đôi/thùng + PO.
- * Số thứ tự thùng = phần số sau ký tự "6" ở đuôi mã QR
- * (VD "AE260850660003" -> 3; "AD260000861537" -> 1537).
- * ĐÃ KIỂM CHỨNG khớp hệ tính toán cũ trên dữ liệu thật:
- * AE2608506 -> P=91 thùng, Q=546 đôi (92 mã duy nhất, 1 mã ngoài khoảng).
+ * Số thứ tự thùng = phần số sau ký tự "6" ở đuôi mã QR, CỘNG 1
+ * (tem in 0-index "…60000" = thùng đầu, packing list đánh 1-index;
+ * VD "AE260850660003" -> 4; "AD260000861537" -> 1538).
+ * ĐÃ KIỂM CHỨNG khớp báo cáo mẫu cũ trên dữ liệu thật:
+ * AE2608506 -> P=92 thùng, Q=552 đôi (11/22/26/16/12/5 theo từng khoảng).
  * Khi quét: size/PO tự điền CHÍNH XÁC từ packing — không cần OCR/pad. */
 let warnedNoPacking = false;
 const PACK_CACHE_KEY = "quetdoc_packing_v1";
@@ -1074,14 +1075,15 @@ function setPacking(rows) {
   state.packingByChi = m;
   state.packingReady = true;
 }
-/* Số thứ tự thùng từ mã QR: đuôi dạng "6" + số (VD "60012" -> 12).
- * Mã "…60000" (= thùng số 0, tem test) hoặc đuôi lạ -> null = ngoài packing. */
+/* Số thứ tự thùng từ mã QR: tem in số thùng 0-index ("…60000" = thùng đầu tiên),
+ * packing list đánh 1-index (1…n) -> CỘNG 1 (đã kiểm chứng khớp báo cáo mẫu cũ:
+ * AE2608506 cho đúng 11/22/26/16/12/5, P=92, Q=552). Đuôi lạ -> null. */
 function boxSeq(content, chiThi) {
   const tail = String(content || "").slice(String(chiThi || "").length);
   const m = /^6(\d+)$/.exec(tail);
   if (!m) return null;
   const n = parseInt(m[1], 10);
-  return Number.isFinite(n) && n >= 1 ? n : null;
+  return Number.isFinite(n) && n >= 0 ? n + 1 : null;
 }
 /* Tra khoảng packing chứa thùng vừa quét -> {size, doi_thung, po, ...} | null */
 function packingLookup(chiThi, content) {
@@ -1341,6 +1343,13 @@ function computeReport(dayRows) {
   });
   return { rows: rows, noPack: noPack, totalScans: seen.size };
 }
+/* ---- v5.0: BÁO CÁO NHẬP KHO đúng mẫu xưởng ----
+ * Mẫu: STT | Mã chỉ thị | Po# | Art# | SIZE | Tổng số đôi | Số đôi/thùng |
+ * Số thùng | Số thùng từ | Số thùng đến | đếm số thùng | số lượng
+ * - "đếm số thùng" (P) = số thùng đã quét nằm trong khoảng (đã dedupe mã trùng)
+ * - "số lượng" (Q) = P × Số đôi/thùng
+ * - Chỉ hiện khoảng có quét (P > 0), đúng mẫu báo cáo cũ của xưởng.
+ * - Mapping số thùng: QR 0-index + 1 = packing 1-index (đã kiểm chứng khớp mẫu cũ). */
 async function exportReport(day, palletQ) {
   if (!state.packingReady || !state.packing.length) {
     toast("Chưa có packing list. Admin hãy chạy migration-v5.0.sql hoặc import Excel packing.", "warn"); return;
@@ -1354,56 +1363,66 @@ async function exportReport(day, palletQ) {
   catch (e) { toast("Không tải được bản ghi: " + (e.message || e), "err"); return; }
   if (palletQ) dayRows = dayRows.filter((r) => (r.session || "").toLowerCase().includes(palletQ));
   const rep = computeReport(dayRows);
-  if (!rep.rows.length && !rep.noPack.length) { toast("Ngày " + day + " chưa có bản ghi nào.", "warn"); return; }
+  const rows = rep.rows.filter((it) => it.p > 0); // đúng mẫu xưởng: chỉ khoảng có quét
+  if (!rows.length && !rep.noPack.length) { toast("Ngày " + day + " chưa có bản ghi nào.", "warn"); return; }
 
-  const headers = ["STT", "Mã chỉ thị", "Po#", "Art#", "SIZE", "Tổng số đôi (KH)",
-    "Số đôi/thùng", "Số thùng (KH)", "Số thùng từ", "Số thùng đến",
-    "Đã quét (thùng)", "Số đôi đã quét", "Còn lại (thùng)"];
+  const YELLOW = "FFFFFF00", GREEN = "FFC6EFCE";
+  const headers = ["STT", "Mã chỉ thị", "Po#", "Art#", "SIZE", "Tổng số đôi",
+    "Số đôi/thùng", "Số thùng", "Số thùng từ", "Số thùng đến",
+    "đếm số thùng", "số lượng"];
   const NC = headers.length;
-  const widths = [8, 16, 18, 14, 12, 18, 14, 15, 14, 14, 16, 16, 16];
   const wb = new ExcelJS.Workbook();
   wb.creator = "QuetDoc QRcode";
-  const ws = wb.addWorksheet("Báo cáo sản lượng");
-  ws.columns = widths.map((w) => ({ width: w }));
-  // Tiêu đề
-  ws.mergeCells(1, 1, 1, NC);
+  const ws = wb.addWorksheet("Báo cáo nhập kho");
+  ws.columns = [{ width: 6 }, { width: 16 }, { width: 18 }, { width: 12 }, { width: 10 },
+                { width: 14 }, { width: 14 }, { width: 12 }, { width: 14 }, { width: 14 },
+                { width: 14 }, { width: 12 }];
+  // Tiêu đề + tổng ở góc phải (đúng mẫu)
+  const dstr = day.split("-").reverse().join("/");
+  ws.mergeCells(1, 1, 1, NC - 2);
   const tc = ws.getCell(1, 1);
-  const palTxt = palletQ ? " · pallet: " + palletQ : "";
-  tc.value = "BÁO CÁO SẢN LƯỢNG : " + day.split("-").reverse().join("/") +
-    palTxt + "  (" + rep.totalScans + " mã quét, dedupe)";
+  tc.value = "BÁO CÁO NHẬP KHO : " + dstr + (palletQ ? " · pallet: " + palletQ : "");
   tc.font = { name: "Arial", size: 14, bold: true };
   tc.alignment = { horizontal: "center", vertical: "middle" };
   ws.getRow(1).height = 26;
+  let sP = 0, sQ = 0;
+  rows.forEach((it) => { sP += it.p; sQ += it.q; });
+  const tp = ws.getCell(1, NC - 1), tq = ws.getCell(1, NC);
+  tp.value = sP; tq.value = sQ;
+  [tp, tq].forEach((c) => {
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: YELLOW } };
+    c.font = { name: "Arial", size: 12, bold: true };
+    c.alignment = { horizontal: "center", vertical: "middle" };
+    c.border = xlBorder();
+  });
+  // Header vàng
   ws.addRow(headers);
-  xlHeaderRow(ws, 2, NC);
-  let sP = 0, sQ = 0, sL = 0, sT = 0;
-  rep.rows.forEach((it, i) => {
+  const hr = ws.getRow(2);
+  for (let c = 1; c <= NC; c++) {
+    const cell = hr.getCell(c);
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: YELLOW } };
+    cell.font = { name: "Arial", size: 11, bold: true, color: { argb: "FF0F172A" } };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    cell.border = xlBorder();
+  }
+  hr.height = 22;
+  // Dữ liệu: 2 cột đếm tô xanh
+  rows.forEach((it, i) => {
     const g = it.rg;
-    sP += it.p; sQ += it.q; sL += it.left; sT += g.so_thung || 0;
     const row = ws.addRow([i + 1, g.chi_thi, g.po || "", g.art || "",
       +g.size || g.size, g.tong_doi || 0, g.doi_thung || 0, g.so_thung || 0,
-      g.thung_tu, g.thung_den, it.p, it.q, it.left]);
-    row.eachCell((cell, cn) => xlBodyCell(cell, cn !== 3 && cn !== 4));
-    const leftCell = row.getCell(NC); // Còn lại: đỏ = còn thiếu, xanh = quét đủ
-    if (it.left > 0) {
-      leftCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFECACA" } };
-      leftCell.font = { name: "Arial", size: 11, bold: true, color: { argb: "FF991B1B" } };
-    } else {
-      leftCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFBBF7D0" } };
-    }
-  });
-  const tr = ws.addRow(["", "TỔNG", "", "", "", "", "", sT, "", "", sP, sQ, sL]);
-  tr.eachCell((cell) => {
-    cell.font = { name: "Arial", size: 11, bold: true };
-    cell.alignment = { vertical: "middle", horizontal: "center" };
-    cell.border = xlBorder();
+      g.thung_tu, g.thung_den, it.p, it.q]);
+    row.eachCell((cell, cn) => {
+      xlBodyCell(cell, cn !== 3 && cn !== 4);
+      if (cn >= NC - 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: GREEN } };
+    });
   });
   if (rep.noPack.length) {
     const ws2 = wb.addWorksheet("Chưa có packing");
     ws2.columns = [{ width: 8 }, { width: 18 }, { width: 16 }];
     ws2.mergeCells(1, 1, 1, 3);
     const t2 = ws2.getCell(1, 1);
-    t2.value = "CÁC CHỈ THỊ CHƯA CÓ PACKING LIST (" + day.split("-").reverse().join("/") + ")";
+    t2.value = "CÁC CHỈ THỊ CHƯA CÓ PACKING LIST (" + dstr + ")";
     t2.font = { name: "Arial", size: 13, bold: true };
     t2.alignment = { horizontal: "center", vertical: "middle" };
     ws2.addRow(["STT", "Chỉ thị", "Số mã quét"]);
@@ -1415,8 +1434,8 @@ async function exportReport(day, palletQ) {
   }
   const stamp = day.replace(/-/g, "") + "_" +
     new Date().toLocaleTimeString("vi-VN", { timeZone: TZ, hour12: false }).replace(/:/g, "");
-  xlDownload(await wb.xlsx.writeBuffer(), "Bao_Cao_San_Luong_" + stamp + ".xlsx");
-  toast("Đã xuất báo cáo sản lượng (" + rep.rows.length + " khoảng, " + rep.totalScans + " mã duy nhất).", "ok");
+  xlDownload(await wb.xlsx.writeBuffer(), "Bao_Cao_Nhap_Kho_" + stamp + ".xlsx");
+  toast("Đã xuất báo cáo nhập kho (" + rows.length + " khoảng, " + sP + " thùng, " + sQ + " đôi).", "ok");
 }
 
 /* Xóa TOÀN BỘ bản ghi quét của mọi tài khoản (chỉ admin).
