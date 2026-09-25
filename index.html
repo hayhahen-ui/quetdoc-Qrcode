@@ -6,13 +6,15 @@
 <meta name="theme-color" content="#0A0D14">
 <meta name="description" content="QuetDoc QRcode — Quét mã QR/barcode bằng camera và ghi nhận dữ liệu, phân quyền quản trị / nhân viên.">
 <title>QuetDoc QRcode · Quét mã & ghi nhận dữ liệu</title>
-<link rel="stylesheet" href="assets/css/styles.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" defer></script>
+<link rel="stylesheet" href="assets/css/styles.css?v=2.2">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" async></script>
 </head>
 <body>
+<noscript><div class="noscript-warn">⚠️ Trình duyệt của bạn đang <b>tắt JavaScript</b> nên app không chạy được. Hãy bật JavaScript cho trang này (hoặc dùng trình duyệt khác/điện thoại).</div></noscript>
 
 <!-- ============ MÀN HÌNH ĐĂNG NHẬP ============ -->
-<div id="viewLogin" class="login-wrap hidden">
+<!-- Hiện sẵn mặc định (không hidden): nếu JS lỗi/chậm thì người dùng vẫn thấy giao diện thay vì trang đen -->
+<div id="viewLogin" class="login-wrap">
   <div class="login-card card">
     <div class="logo big">📷</div>
     <h1>QuetDoc QRcode</h1>
@@ -224,6 +226,6 @@
 </div>
 
 <div id="toasts"></div>
-<script src="assets/js/app.js" defer></script>
+<script src="assets/js/app.js?v=2.2" defer></script>
 </body>
 </html>

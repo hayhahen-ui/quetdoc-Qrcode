@@ -536,8 +536,14 @@ function setHttpsChip() {
 }
 
 async function listCameras() {
-  try { state.cameras = await Html5Qrcode.getCameras(); }
-  catch (e) { state.cameras = []; }
+  // Thư viện CDN nạp async nên có thể chưa sẵn sàng lúc init: đợi tối đa ~10s
+  state.cameras = [];
+  for (let i = 0; i < 20; i++) {
+    try {
+      if (typeof Html5Qrcode !== "undefined") { state.cameras = await Html5Qrcode.getCameras(); break; }
+    } catch (e) { state.cameras = []; break; }
+    await new Promise((r) => setTimeout(r, 500));
+  }
   const sel = $("cameraSelect");
   sel.innerHTML = "";
   if (!state.cameras.length) {
