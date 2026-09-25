@@ -114,6 +114,18 @@
         </div>
       </div>
 
+      <div class="sizeblock" style="margin-top:12px">
+        <label class="seclabel">Size thùng (UK) — chạm chọn 1 lần, giữ nguyên cho các mã quét tiếp theo</label>
+        <div class="sizepad" id="sizePad"></div>
+        <div class="pairsrow">
+          <span>Số đôi / thùng:</span>
+          <button id="pairsMinus" class="stepbtn" aria-label="Giảm">−</button>
+          <b id="pairsVal">6</b>
+          <button id="pairsPlus" class="stepbtn" aria-label="Tăng">＋</button>
+          <span class="muted" id="sizePreview"></span>
+        </div>
+      </div>
+
       <div class="btnrow" style="margin-top:12px">
         <label class="check"><input type="checkbox" id="chkSound" checked> Âm báo khi quét</label>
       </div>
@@ -173,11 +185,11 @@
   <!-- ============ DANH MỤC CHỈ THỊ (ADMIN) ============ -->
   <section class="card pad hidden" id="dirPanel" style="margin-top:12px">
     <h2 class="sec-title">🏷 Danh mục Chỉ thị <span class="muted" style="font-weight:400">(chỉ quản trị viên)</span></h2>
-    <p class="sec-hint">Khi quét tem thùng, app tự tách <b>Chỉ thị</b> từ số thùng (9 ký tự đầu) và tra <b>PO / Size mặc định</b> từ danh mục này. Size từng thùng có thể bấm sửa trực tiếp trên bảng dữ liệu.</p>
+    <p class="sec-hint">Khi quét tem thùng, app tự tách <b>Chỉ thị</b> từ số thùng (9 ký tự đầu) và tra <b>PO cố định</b> từ danh mục này. <b>Size mỗi thùng mỗi khác</b> — chọn ở khung quét phía trên (giữ nguyên cho các mã tiếp theo).</p>
     <div class="toolbar"><button class="small" id="btnDirAdd">＋ Thêm chỉ thị</button></div>
     <div style="overflow-x:auto;margin-top:8px">
       <table>
-        <thead><tr><th>Chỉ thị</th><th>PO</th><th>Size mặc định</th><th></th></tr></thead>
+        <thead><tr><th>Chỉ thị</th><th>PO</th><th></th></tr></thead>
         <tbody id="dirBody"></tbody>
       </table>
     </div>
@@ -220,6 +232,6 @@
 </div>
 
 <div id="toasts"></div>
-<script src="assets/js/app.js?v=4.3" defer></script>
+<script src="assets/js/app.js?v=4.4" defer></script>
 </body>
 </html>

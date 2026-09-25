@@ -138,3 +138,14 @@ td.editable:hover{background:rgba(245,158,11,.14)}
 /* v4.1: vùng nguy hiểm (admin xóa toàn bộ) */
 .danger-zone{margin-top:16px;border:1px solid var(--red);border-radius:10px;padding:12px;background:rgba(239,68,68,.06)}
 .danger-zone h3{margin:0 0 4px;color:var(--red);font-size:15px}
+
+/* v4.4: pad chọn size 1 chạm (UK 3.0-9.0) + số đôi/thùng */
+.sizeblock .seclabel{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+.sizepad{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.szbtn{padding:8px 0;border:1px solid var(--border);border-radius:8px;background:var(--elev);color:var(--text);font-size:13px;cursor:pointer}
+.szbtn.active{background:var(--amber);border-color:var(--amber);color:#1a1a1a;font-weight:700}
+.szbtn.clear{color:var(--muted)}
+.pairsrow{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px}
+.pairsrow .muted{font-size:12px}
+.stepbtn{width:30px;height:30px;border:1px solid var(--border);border-radius:8px;background:var(--elev);color:var(--text);font-size:16px;cursor:pointer}
+#pairsVal{min-width:20px;text-align:center}

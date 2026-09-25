@@ -39,7 +39,7 @@ async function ensureSupa() {
 const state = {
   records: [],          // [{id, content, format, scannedAt, session, note, userId, username}]
   dupSkipped: 0,        // số lượt quét trùng đã bỏ qua
-  settings: { session: "", note: "", sound: true },
+  settings: { session: "", note: "", sound: true, sizeUK: "", pairs: 6 },
   me: null,             // user đang đăng nhập {id, username, role}
   scanning: false,
   cameras: [],
@@ -52,7 +52,7 @@ const state = {
   page: 0,
   filterText: "",
   filterDate: "",
-  directives: {},       // danh mục Chỉ thị: { "AE2608210": {po, size} }
+  directives: {},       // danh mục Chỉ thị: { "AE2608210": {po} } (PO cố định; size mỗi thùng mỗi khác -> chọn ở pad quét)
 };
 
 let html5Qr = null;
@@ -247,6 +247,41 @@ function openModal(title, bodyHTML, okLabel, onOk) {
 }
 function closeModal() { $("modal").classList.add("hidden"); modalOkFn = null; }
 
+// v4.4: Size mỗi thùng mỗi khác (UK 3.0-9.0), không có trong QR -> công nhân
+// chạm chọn 1 lần trên pad, size "dính" cho các mã quét tiếp theo tới khi đổi.
+const SIZES_UK = ["3.0","3.5","4.0","4.5","5.0","5.5","6.0","6.5","7.0","7.5","8.0","8.5","9.0"];
+function currentSizeStr() {
+  const s = state.settings.sizeUK;
+  return s ? s + "-" + (state.settings.pairs ?? 6) : "";
+}
+function renderSizePad() {
+  const wrap = $("sizePad");
+  if (!wrap) return;
+  wrap.innerHTML = SIZES_UK.map((s) =>
+    "<button class='szbtn" + (state.settings.sizeUK === s ? " active" : "") +
+    "' data-size='" + s + "'>" + s + "</button>").join("") +
+    "<button class='szbtn clear' data-size='' title='Bỏ chọn'>✖</button>";
+  wrap.querySelectorAll(".szbtn").forEach((b) =>
+    b.addEventListener("click", () => {
+      state.settings.sizeUK = b.getAttribute("data-size");
+      saveStore(); renderSizePad();
+    }));
+  renderPairs();
+}
+function renderPairs() {
+  const v = $("pairsVal"), pv = $("sizePreview");
+  if (v) v.textContent = state.settings.pairs ?? 6;
+  if (pv) {
+    const s = currentSizeStr();
+    pv.textContent = s ? ("→ các mã sắp quét sẽ ghi: " + s) : "→ chưa chọn size (mã quét sẽ trống size)";
+  }
+}
+function bumpPairs(d) {
+  const p = Math.min(20, Math.max(0, (state.settings.pairs ?? 6) + d));
+  state.settings.pairs = p;
+  saveStore(); renderPairs();
+}
+
 /* ---------------- records (Supabase - dữ liệu chung đa thiết bị) ---------------- */
 const rowToRec = (r) => {
   const content = r.content || "";
@@ -335,7 +370,9 @@ async function addRecord(content, format) {
   const dupLocal = state.records.find((r) => norm(r.content) === norm(content));
   if (dupLocal) { showDupBox(dupLocal, content); return; }
 
-  // Tem thùng giày: tự tách chỉ thị từ số thùng, tra PO/Size mặc định từ danh mục
+  // Tem thùng giày: tự tách chỉ thị từ số thùng, tra PO cố định từ danh mục.
+  // Size mỗi thùng mỗi khác -> lấy từ pad chọn size (dính cho các mã tiếp theo),
+  // KHÔNG dùng size mặc định theo chỉ thị nữa.
   const chiThi = parseChiThi(content);
   const dir = chiThi ? state.directives[chiThi] : null;
 
@@ -347,7 +384,7 @@ async function addRecord(content, format) {
     scannedAt: new Date().toISOString(),
     session: state.settings.session.trim(), note: state.settings.note.trim(),
     userId: state.me.id, username: state.me.username,
-    chiThi, po: dir ? dir.po : "", size: dir ? dir.size : "",
+    chiThi, po: dir ? dir.po : "", size: currentSizeStr(),
     pending: true,
   };
   state.records.unshift(rec);
@@ -622,9 +659,9 @@ async function loadDirectives() {
   state.directives = {};
   if (!supa) return;
   try {
-    const { data, error } = await supa.from("directives").select("chi_thi,po,size").order("chi_thi");
+    const { data, error } = await supa.from("directives").select("chi_thi,po").order("chi_thi");
     if (error) throw error;
-    (data || []).forEach((d) => { state.directives[d.chi_thi] = { po: d.po || "", size: d.size || "" }; });
+    (data || []).forEach((d) => { state.directives[d.chi_thi] = { po: d.po || "" }; });
   } catch (e) {
     console.warn("Không tải được danh mục chỉ thị:", e.message);
     // Bảng chưa tồn tại = chưa chạy migration v4.0 -> nhắc admin 1 lần/phiên
@@ -640,12 +677,12 @@ function renderDirectives() {
   if (!body) return;
   const keys = Object.keys(state.directives).sort();
   if (!keys.length) {
-    body.innerHTML = "<tr><td colspan='4' class='muted'>Chưa có chỉ thị nào. Bấm “＋ Thêm chỉ thị”.</td></tr>";
+    body.innerHTML = "<tr><td colspan='3' class='muted'>Chưa có chỉ thị nào. Bấm “＋ Thêm chỉ thị”.</td></tr>";
     return;
   }
   body.innerHTML = keys.map((k) => {
     const d = state.directives[k];
-    return "<tr><td><b>" + esc(k) + "</b></td><td>" + esc(d.po || "—") + "</td><td>" + esc(d.size || "—") + "</td>" +
+    return "<tr><td><b>" + esc(k) + "</b></td><td>" + esc(d.po || "—") + "</td>" +
       "<td style='white-space:nowrap'><button class='small' data-diredit='" + esc(k) + "'>Sửa</button> " +
       "<button class='small danger' data-dirdel='" + esc(k) + "'>Xóa</button></td></tr>";
   }).join("");
@@ -655,33 +692,29 @@ function renderDirectives() {
     b.addEventListener("click", () => dirDelete(b.getAttribute("data-dirdel"))));
 }
 function dirForm(chiThi) {
-  const d = (chiThi && state.directives[chiThi]) || { po: "", size: "" };
+  const d = (chiThi && state.directives[chiThi]) || { po: "" };
   openModal(chiThi ? "Sửa chỉ thị " + chiThi : "Thêm chỉ thị",
     "<div class='field'><label>Chỉ thị (2 chữ + 7 số)</label>" +
     "<input id='mChiThi' value='" + esc(chiThi || "") + "'" + (chiThi ? " disabled" : "") +
     " placeholder='VD: AE2608210' style='text-transform:uppercase'></div>" +
-    "<div class='field'><label>PO</label><input id='mPo' value='" + esc(d.po) + "' placeholder='VD: 0903174893-1'></div>" +
-    "<div class='field'><label>Size mặc định (tự điền khi quét, sửa được từng thùng)</label>" +
-    "<input id='mSize' value='" + esc(d.size) + "' placeholder='VD: 5.0-6'></div>",
+    "<div class='field'><label>PO (cố định theo chỉ thị)</label><input id='mPo' value='" + esc(d.po) + "' placeholder='VD: 0903174893-1'></div>" +
+    "<p class='muted' style='font-size:12px'>Size mỗi thùng mỗi khác nên công nhân chọn ở khung quét, không nhập ở đây.</p>",
     "Lưu", async () => {
       const k = (chiThi || $("mChiThi").value).trim().toUpperCase();
-      const po = $("mPo").value.trim(), size = $("mSize").value.trim();
+      const po = $("mPo").value.trim();
       if (!/^[A-Z]{2}\d{7}$/.test(k)) { toast("Chỉ thị phải đúng dạng 2 chữ + 7 số (VD: AE2608210).", "warn"); return; }
       const { error } = await supa.from("directives").upsert(
-        { chi_thi: k, po, size, updated_at: new Date().toISOString(), updated_by: state.me.username },
+        { chi_thi: k, po, updated_at: new Date().toISOString(), updated_by: state.me.username },
         { onConflict: "chi_thi" });
       closeModal();
       if (error) { toast("Lỗi lưu danh mục: " + error.message, "err"); return; }
       await loadDirectives();
-      // Kaizen: tự điền PO/Size cho các bản ghi cũ cùng chỉ thị mà đang trống,
-      // để bảng và file xuất không còn ô "—" sau khi admin bổ sung danh mục.
-      if (schemaV4 && (po || size)) {
+      // Kaizen: tự điền PO cho các bản ghi cũ cùng chỉ thị mà đang trống PO,
+      // để bảng và file xuất có PO ngay sau khi admin bổ sung danh mục.
+      if (schemaV4 && po) {
         try {
-          const fill = {};
-          if (po) fill.po = po;
-          if (size) fill.size = size;
-          await supa.from("records").update(fill).eq("chi_thi", k).eq("po", "");
-          await supa.from("records").update(fill).eq("chi_thi", k).is("po", null);
+          await supa.from("records").update({ po }).eq("chi_thi", k).eq("po", "");
+          await supa.from("records").update({ po }).eq("chi_thi", k).is("po", null);
           await loadRecords();
         } catch (e) { /* thiếu quyền/cột -> bỏ qua, không chặn */ }
       }
@@ -1027,6 +1060,8 @@ function bindEvents() {
   $("sessionInput").addEventListener("input", (e) => { state.settings.session = e.target.value; saveStore(); });
   $("noteInput").addEventListener("input", (e) => { state.settings.note = e.target.value; saveStore(); });
   $("chkSound").addEventListener("change", (e) => { state.settings.sound = e.target.checked; saveStore(); });
+  $("pairsMinus").addEventListener("click", () => bumpPairs(-1));
+  $("pairsPlus").addEventListener("click", () => bumpPairs(1));
 
   $("searchInput").addEventListener("input", (e) => { state.filterText = e.target.value; state.page = 0; renderTable(); });
   $("dateInput").addEventListener("change", (e) => { state.filterDate = e.target.value; state.page = 0; renderTable(); });
@@ -1064,6 +1099,7 @@ async function init() {
     $("sessionInput").value = state.settings.session || "";
     $("noteInput").value = state.settings.note || "";
     $("chkSound").checked = state.settings.sound !== false;
+    renderSizePad();
     setHttpsChip();
     setCamStatus("⚪ Camera đang tắt", "");
     bindEvents();
