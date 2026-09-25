@@ -228,6 +228,7 @@ async function enterApp() {
   } catch (e) {
     toast("Không tải được dữ liệu: " + (e.message || e), "err");
   }
+  refreshSession(); // v5.3: đối chiếu phiên quét với dữ liệu vừa tải + bật/tắt nút quét
 }
 
 /* ---------------- realtime: tự cập nhật khi máy khác quét ---------------- */
@@ -498,6 +499,12 @@ async function addRecord(content, format) {
   const pack = packingLookup(chiThi, content);
   const po = (pack && pack.po) || masterPO(chiThi);
   const packSize = packSizeStr(pack);
+  // v5.3: cảnh báo khi mã quét lệch phiên đã khai báo (vẫn ghi nhận)
+  const sr = sessionResolved();
+  if (sr.chiFull && chiThi && chiThi !== sr.chiFull)
+    toast("⚠ Mã thuộc chỉ thị " + chiThi + ", khác chỉ thị phiên (" + sr.chiFull + ") — vẫn ghi nhận.", "warn");
+  if (sr.poFull && po && po !== sr.poFull)
+    toast("⚠ PO của mã (" + po + ") khác PO phiên (" + sr.poFull + ") — vẫn ghi nhận.", "warn");
   if (chiThi && !po && state.masterReady && !masterWarned.has(chiThi)) {
     masterWarned.add(chiThi);
     toast("Chỉ thị " + chiThi + " chưa có trong master data — PO để trống. Admin bổ sung đơn hàng.", "warn");
@@ -509,7 +516,7 @@ async function addRecord(content, format) {
   const rec = {
     id: tempId, content, format: format || "QR",
     scannedAt: new Date().toISOString(),
-    session: state.settings.session.trim(), note: state.settings.note.trim(),
+    session: sessionLabel(), note: state.settings.note.trim(),
     userId: state.me.id, username: state.me.username,
     chiThi, po, size: packSize || currentSizeStr(),
     pending: true,
@@ -702,6 +709,111 @@ function refreshReportBtn() {
   const b = $("btnExportReport");
   if (b) b.disabled = !state.packingReady || !state.packing.length; // v5.0: cần packing list
 }
+/* v5.3: PHIÊN QUÉT bắt buộc — loại pallet (Kiểm/Nhập/Xuất) + số pallet +
+ * 4 số cuối chỉ thị/PO. Nhập đủ mới bật nút quét; chỉ thị/PO được đối chiếu
+ * với packing/master (trùng nhiều -> chọn tay); mã quét lệch phiên -> cảnh báo. */
+function getSession() {
+  return state.settings.sess || (state.settings.sess =
+    { type: "", pallet: "", chi: "", po: "", chiPick: "", poPick: "" });
+}
+function knownDirectives() {
+  const s = new Set();
+  if (state.packingByChi) state.packingByChi.forEach((_, k) => s.add(k));
+  Object.keys(state.master || {}).forEach((k) => s.add(k));
+  return [...s].sort();
+}
+function knownPOs() {
+  const s = new Set();
+  (state.packing || []).forEach((r) => { if (r.po) s.add(r.po); });
+  Object.values(state.master || {}).forEach((m) => { if (m.po) s.add(m.po); });
+  return [...s].sort();
+}
+const sessDataReady = () => (state.packingReady && state.packing.length > 0) || state.masterReady;
+function sessionResolved() {
+  // Đối chiếu 4 số cuối với dữ liệu đã biết. Chưa có dữ liệu -> chấp nhận
+  // 4 số (không chặn quét offline), chỉ bỏ cảnh báo lệch phiên.
+  const s = getSession();
+  const ready = sessDataReady();
+  let chiFull = "", poFull = "", chiOpts = [], poOpts = [];
+  if (s.chi.length === 4 && ready) {
+    chiOpts = knownDirectives().filter((c) => c.endsWith(s.chi));
+    if (chiOpts.length === 1) chiFull = chiOpts[0];
+    else if (chiOpts.length > 1 && chiOpts.includes(s.chiPick)) chiFull = s.chiPick;
+  }
+  if (s.po.length === 4 && ready) {
+    poOpts = knownPOs().filter((p) => String(p).split("-")[0].endsWith(s.po));
+    if (poOpts.length === 1) poFull = poOpts[0];
+    else if (poOpts.length > 1 && poOpts.includes(s.poPick)) poFull = s.poPick;
+  }
+  return { chiFull, poFull, chiOpts, poOpts, ready };
+}
+function sessionStatus() {
+  const s = getSession();
+  const r = sessionResolved();
+  const miss = [];
+  if (!s.type) miss.push("loại pallet");
+  if (!s.pallet || !(+s.pallet >= 1)) miss.push("số pallet");
+  if (s.chi.length !== 4) miss.push("4 số cuối chỉ thị");
+  else if (r.ready && !r.chiFull) miss.push(r.chiOpts.length > 1
+    ? "chọn chỉ thị (" + r.chiOpts.length + " kết quả khớp)"
+    : "chỉ thị khớp (" + s.chi + " không có trong packing/master)");
+  if (s.po.length !== 4) miss.push("4 số cuối PO");
+  else if (r.ready && !r.poFull) miss.push(r.poOpts.length > 1
+    ? "chọn PO (" + r.poOpts.length + " kết quả khớp)"
+    : "PO khớp (" + s.po + " không có trong packing/master)");
+  return { ok: !miss.length, miss, r };
+}
+function sessionLabel() {
+  const s = getSession();
+  return (s.type + " " + s.pallet).trim(); // VD "Kiểm 1"
+}
+function renderSessPick(wrapId, selId, opts, cur, onPick) {
+  const wrap = $(wrapId), sel = $(selId);
+  if (!wrap || !sel) return;
+  if (opts.length > 1) {
+    wrap.classList.remove("hidden");
+    sel.innerHTML = '<option value="">— Chọn —</option>' + opts.map((o) =>
+      '<option value="' + esc(o) + '"' + (o === cur ? " selected" : "") + ">" + esc(o) + "</option>").join("");
+    sel.onchange = (e) => onPick(e.target.value);
+  } else wrap.classList.add("hidden");
+}
+function refreshSession() {
+  const s = getSession();
+  s.type = $("sessType").value;
+  s.pallet = $("sessPallet").value.trim();
+  s.chi = $("sessChi").value.replace(/\D/g, "").slice(-4);
+  s.po = $("sessPo").value.replace(/\D/g, "").slice(-4);
+  const st = sessionStatus();
+  renderSessPick("sessChiPickWrap", "sessChiPick", st.r.chiOpts, s.chiPick,
+    (v) => { s.chiPick = v; saveStore(); updateScanGate(); });
+  renderSessPick("sessPoPickWrap", "sessPoPick", st.r.poOpts, s.poPick,
+    (v) => { s.poPick = v; saveStore(); updateScanGate(); });
+  saveStore();
+  updateScanGate();
+  if (state.scanning && !st.ok) { // đang quét mà phiên hết hiệu lực -> dừng
+    stopScan();
+    toast("Phiên quét chưa đủ thông tin — đã dừng camera.", "warn");
+  }
+}
+function updateScanGate() {
+  const st = sessionStatus();
+  const s = getSession();
+  [["btnStart", true], ["btnFromFile", false], ["btnManualAdd", false]].forEach(([id, isStart]) => {
+    const b = $(id);
+    if (b) b.disabled = !st.ok || (isStart && state.scanning);
+  });
+  const h = $("sessHint");
+  if (h) {
+    h.className = "sesshint " + (st.ok ? "ok" : "miss");
+    if (st.ok) {
+      h.innerHTML = "✓ Phiên: <b>" + esc(s.type) + " · pallet " + esc(s.pallet) + "</b>" +
+        (st.r.chiFull ? " · " + esc(st.r.chiFull) : "") +
+        (st.r.poFull ? " · PO " + esc(st.r.poFull) : "");
+    } else {
+      h.textContent = "⚠ Chưa quét được — còn thiếu: " + st.miss.join(", ");
+    }
+  }
+}
 function renderAll() {
   if (!state.me) { doLogout(); return; }
   renderStats(); renderTable();
@@ -851,6 +963,7 @@ async function loadMaster() {
     }
   }
   if (isAdmin()) renderMaster();
+  refreshSession(); // v5.3: đối chiếu lại phiên quét khi master đổi
 }
 function masterPO(chiThi) {
   const m = chiThi && state.master[chiThi];
@@ -1070,6 +1183,7 @@ async function loadPacking() {
   if (isAdmin()) renderPacking();
   refreshReportBtn(); // v5.1.1: bật nút báo cáo ngay khi packing tải xong
   backfillPackingSizes(); // v5.2.2: vá size/PO cho bản ghi quét lúc chưa có packing
+  refreshSession(); // v5.3: đối chiếu lại phiên quét khi packing đổi
 }
 function setPacking(rows) {
   state.packing = rows;
@@ -1716,6 +1830,10 @@ async function listCameras() {
 
 async function startScan() {
   if (state.scanning) return;
+  if (!sessionStatus().ok) { // v5.3: bắt buộc nhập đủ phiên quét
+    toast("Hãy nhập đủ thông tin phiên quét (loại, số pallet, 4 số cuối chỉ thị/PO) trước.", "warn");
+    return;
+  }
   if (typeof Html5Qrcode === "undefined") { toast("Chưa tải được thư viện quét mã. Kiểm tra mạng rồi tải lại trang.", "err"); return; }
   const camId = $("cameraSelect").value;
   // Kể cả khi liệt kê camera thất bại (dropdown trống), vẫn thử mở bằng
@@ -1786,7 +1904,9 @@ async function stopScan() {
   try { html5Qr.clear(); } catch (e) {}
   state.scanning = false; state.torchOn = false; state.realFacing = "";
   const bs = $("btnStart"), bt = $("btnStop"), cs = $("cameraSelect");
-  if (bs) { bs.disabled = false; bt.disabled = true; cs.disabled = false; }
+  if (bt) bt.disabled = true;
+  if (cs) cs.disabled = false;
+  updateScanGate(); // v5.3: bật/tắt nút quét theo phiên (thay vì mở cứng)
   const tb = $("btnTorch");
   if (tb) tb.classList.add("hidden");
   const zr = $("zoomRow");
@@ -1835,6 +1955,7 @@ async function toggleTorch() {  try {
 }
 function scanFromFile(file) {
   if (!file) return;
+  if (!sessionStatus().ok) { toast("Hãy nhập đủ thông tin phiên quét trước khi quét từ ảnh.", "warn"); return; } // v5.3
   if (typeof Html5Qrcode === "undefined") { toast("Chưa tải được thư viện quét mã.", "err"); return; }
   const tmp = new Html5Qrcode("reader");
   toast("Đang đọc mã từ ảnh…", "");
@@ -1869,13 +1990,18 @@ function bindEvents() {
   $("fileInput").addEventListener("change", (e) => { scanFromFile(e.target.files[0]); e.target.value = ""; });
 
   $("btnManualAdd").addEventListener("click", () => {
+    if (!sessionStatus().ok) { toast("Hãy nhập đủ thông tin phiên quét trước khi thêm mã.", "warn"); return; }
     const v = $("manualInput").value.trim();
     if (!v) { toast("Nhập nội dung mã trước khi thêm.", "warn"); return; }
     addRecord(v, "Nhập tay"); $("manualInput").value = "";
   });
   $("manualInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btnManualAdd").click(); });
 
-  $("sessionInput").addEventListener("input", (e) => { state.settings.session = e.target.value; saveStore(); });
+  // v5.3: phiên quét bắt buộc
+  ["sessType", "sessPallet", "sessChi", "sessPo"].forEach((id) => {
+    $(id).addEventListener("input", refreshSession);
+    $(id).addEventListener("change", refreshSession);
+  });
   $("noteInput").addEventListener("input", (e) => { state.settings.note = e.target.value; saveStore(); });
   $("chkSound").addEventListener("change", (e) => { state.settings.sound = e.target.checked; saveStore(); });
   $("chkOcr").addEventListener("change", (e) => { state.settings.ocr = e.target.checked; saveStore(); });
@@ -1924,7 +2050,12 @@ async function init() {
   // login hiện sẵn mặc định trong HTML (chống trang đen)
   try {
     loadStore();
-    $("sessionInput").value = state.settings.session || "";
+    // v5.3: khôi phục phiên quét đã lưu
+    const sess0 = getSession();
+    $("sessType").value = sess0.type || "";
+    $("sessPallet").value = sess0.pallet || "";
+    $("sessChi").value = sess0.chi || "";
+    $("sessPo").value = sess0.po || "";
     $("noteInput").value = state.settings.note || "";
     $("chkSound").checked = state.settings.sound !== false;
     $("chkOcr").checked = state.settings.ocr !== false;

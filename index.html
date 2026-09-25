@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0A0D14">
 <meta name="description" content="QuetDoc QRcode — Quét mã QR/barcode bằng camera và ghi nhận dữ liệu, phân quyền quản trị / nhân viên.">
 <title>QuetDoc QRcode · Quét mã & ghi nhận dữ liệu</title>
-<link rel="stylesheet" href="assets/css/styles.css?v=5.2.3">
+<link rel="stylesheet" href="assets/css/styles.css?v=5.3">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" async></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" async></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" async></script>
@@ -103,12 +103,41 @@
         <button id="btnManualAdd">＋ Thêm</button>
       </div>
 
-      <div class="rowflex" style="margin-top:12px">
-        <div class="field inline">
-          <label for="sessionInput">Số pallet</label>
-          <input type="text" id="sessionInput" placeholder="VD: 449, NK 4573…">
+      <div class="sessblock" style="margin-top:12px">
+        <label class="seclabel">🎯 <b>Phiên quét — bắt buộc nhập đủ mới quét được</b></label>
+        <div class="sessgrid">
+          <div class="field">
+            <label for="sessType">Loại pallet</label>
+            <select id="sessType">
+              <option value="">— Chọn —</option>
+              <option value="Kiểm">Kiểm</option>
+              <option value="Nhập">Nhập</option>
+              <option value="Xuất">Xuất</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="sessPallet">Số pallet</label>
+            <input type="number" id="sessPallet" min="1" step="1" inputmode="numeric" placeholder="1">
+          </div>
+          <div class="field">
+            <label for="sessChi">Chỉ thị · 4 số cuối</label>
+            <input type="text" id="sessChi" inputmode="numeric" maxlength="4" placeholder="VD: 8209">
+          </div>
+          <div class="field">
+            <label for="sessPo">PO · 4 số cuối</label>
+            <input type="text" id="sessPo" inputmode="numeric" maxlength="4" placeholder="VD: 4964">
+          </div>
         </div>
-        <div class="field inline">
+        <div class="sesspick hidden" id="sessChiPickWrap">
+          <label for="sessChiPick">Chọn chỉ thị khớp</label>
+          <select id="sessChiPick"></select>
+        </div>
+        <div class="sesspick hidden" id="sessPoPickWrap">
+          <label for="sessPoPick">Chọn PO khớp</label>
+          <select id="sessPoPick"></select>
+        </div>
+        <div class="sesshint" id="sessHint"></div>
+        <div class="field" style="margin-top:8px">
           <label for="noteInput">Ghi chú mặc định</label>
           <input type="text" id="noteInput" placeholder="Ghi chú gắn cho các mã sắp quét">
         </div>
@@ -241,7 +270,7 @@
   </section>
 
   <footer>
-    QuetDoc QRcode · <b>v5.2.3</b> · đồng bộ Supabase (đa thiết bị).<br>
+    QuetDoc QRcode · <b>v5.3</b> · đồng bộ Supabase (đa thiết bị).<br>
     💡 Mẹo: mở trang bằng <b>HTTPS</b> thì trình duyệt mới cho phép dùng camera.
   </footer>
 </div>
@@ -260,6 +289,6 @@
 </div>
 
 <div id="toasts"></div>
-<script src="assets/js/app.js?v=5.2.3" defer></script>
+<script src="assets/js/app.js?v=5.3" defer></script>
 </body>
 </html>

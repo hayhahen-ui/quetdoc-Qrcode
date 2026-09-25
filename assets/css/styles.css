@@ -62,9 +62,19 @@ button.small{min-height:32px;padding:0 10px;font-size:12px}
 .field{display:flex;flex-direction:column;gap:6px;margin-top:10px}
 .field.inline{margin-top:0;flex:1;min-width:150px}
 label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
-select,input[type=text],input[type=date],input[type=password]{font:inherit;min-height:38px;border-radius:10px;
+select,input[type=text],input[type=number],input[type=date],input[type=password]{font:inherit;min-height:38px;border-radius:10px;
   border:1px solid var(--border);background:var(--elev);color:var(--text);padding:0 10px;font-size:13px;outline:none;width:100%}
-select:focus,input[type=text]:focus,input[type=date]:focus,input[type=password]:focus{border-color:var(--blue)}
+select:focus,input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,input[type=password]:focus{border-color:var(--blue)}
+
+/* v5.3: khối phiên quét bắt buộc */
+.sessblock .seclabel{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+.sessgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.sessgrid .field{margin-top:0;min-width:0}
+@media (max-width:560px){.sessgrid{grid-template-columns:repeat(2,1fr)}}
+.sesspick{margin-top:8px}
+.sesshint{margin-top:8px;font-size:13px;line-height:1.5}
+.sesshint.ok{color:#4ade80}
+.sesshint.miss{color:#fbbf24}
 .rowflex{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
 .check{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);cursor:pointer;user-select:none}
 .check input{width:16px;height:16px;accent-color:var(--emerald)}
