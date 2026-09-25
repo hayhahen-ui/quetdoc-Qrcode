@@ -1859,6 +1859,27 @@ function computeReport(dayRows) {
  * - "số lượng" (Q) = P × Số đôi/thùng
  * - Chỉ hiện khoảng có quét (P > 0), đúng mẫu báo cáo cũ của xưởng.
  * - Mapping số thùng: QR 0-index + 1 = packing 1-index (đã kiểm chứng khớp mẫu cũ). */
+/* v6.8: tên sheet báo cáo theo nghiệp vụ (trước đây cứng "Báo cáo nhập kho") */
+function reportSheetName(typeQ) {
+  return { "kiểm": "Báo cáo kiểm kho", "nhập": "Báo cáo nhập kho", "xuất": "Báo cáo xuất kho" }[typeQ] || "Báo cáo nhập kho";
+}
+/* v6.8: gom các dòng báo cáo theo chỉ thị + tính tổng nhóm (để chèn dòng "Tổng" đúng mẫu xưởng) */
+function groupReportRows(rows) {
+  const groups = new Map();
+  (rows || []).forEach((it) => {
+    const ct = it.rg.chi_thi;
+    if (!groups.has(ct)) groups.set(ct, { chi_thi: ct, items: [], sP: 0, sQ: 0 });
+    const gr = groups.get(ct);
+    gr.items.push(it); gr.sP += it.p; gr.sQ += it.q;
+  });
+  return [...groups.values()];
+}
+/* v6.8: chuỗi cột M "số thứ tự thùng": "048,049,050,051 = 4 thùng" (số in trên tem) */
+function boxListStr(boxes) {
+  return boxes.length
+    ? boxes.map((n) => String(n).padStart(3, "0")).join(",") + " = " + boxes.length + " thùng"
+    : "";
+}
 async function exportReport(day, palletQ, typeQ) {
   if (!state.packingReady || !state.packing.length) {
     toast("Chưa có packing list. Admin hãy chạy migration-v5.0.sql hoặc import Excel packing.", "warn"); return;
@@ -1884,10 +1905,10 @@ async function exportReport(day, palletQ, typeQ) {
   const NC = headers.length;
   const wb = new ExcelJS.Workbook();
   wb.creator = "QuetDoc QRcode";
-  const ws = wb.addWorksheet("Báo cáo nhập kho");
+  const ws = wb.addWorksheet(reportSheetName(typeQ)); // v6.8: tên sheet theo nghiệp vụ
   ws.columns = [{ width: 6 }, { width: 16 }, { width: 18 }, { width: 12 }, { width: 10 },
                 { width: 14 }, { width: 14 }, { width: 12 }, { width: 14 }, { width: 14 },
-                { width: 14 }, { width: 12 }, { width: 18 }, { width: 16 }];
+                { width: 14 }, { width: 12 }, { width: 44 }, { width: 16 }]; // v6.8: cột M rộng như mẫu
   // Tiêu đề + tổng ở góc phải (đúng mẫu): tổng luôn nằm dưới 2 cột đếm (K, L)
   const dstr = day.split("-").reverse().join("/");
   ws.mergeCells(1, 1, 1, 10);
@@ -1922,20 +1943,44 @@ async function exportReport(day, palletQ, typeQ) {
     cell.border = xlBorder();
   }
   hr.height = 22;
-  // Dữ liệu: 2 cột đếm tô xanh; cột M: "002,003,004 = 3 thùng" (số in trên tem)
-  rows.forEach((it, i) => {
-    const g = it.rg;
-    const boxStr = it.boxes.length
-      ? it.boxes.map((n) => String(n).padStart(3, "0")).join(",") + " = " + it.boxes.length + " thùng"
-      : "";
-    const row = ws.addRow([i + 1, g.chi_thi, g.po || "", g.art || "",
-      +g.size || g.size, g.tong_doi || 0, g.doi_thung || 0, g.so_thung || 0,
-      g.thung_tu, g.thung_den, it.p, it.q, boxStr, it.users || ""]);
-    row.eachCell((cell, cn) => {
-      xlBodyCell(cell, cn !== 3 && cn !== 4 && cn !== 14); // v5.6: cột N tên người quét căn trái
-      if (cn === NC - 2 || cn === NC - 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: GREEN } };
-      if (cn === NC) { cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true }; row.height = Math.max(18, Math.ceil(boxStr.length / 28) * 15); }
+  // v6.8: đúng mẫu xưởng — gom theo chỉ thị, chèn dòng "Tổng" cam sau mỗi nhóm;
+  // 3 cột K/L/M (đếm số thùng, số lượng, số thứ tự thùng) tô xanh.
+  const ORANGE = "FFF59E0B";
+  let stt = 0;
+  groupReportRows(rows).forEach((gr) => {
+    gr.items.forEach((it) => {
+      stt++;
+      const g = it.rg;
+      const boxStr = boxListStr(it.boxes);
+      const row = ws.addRow([stt, g.chi_thi, g.po || "", g.art || "",
+        +g.size || g.size, g.tong_doi || 0, g.doi_thung || 0, g.so_thung || 0,
+        g.thung_tu, g.thung_den, it.p, it.q, boxStr, it.users || ""]);
+      row.eachCell((cell, cn) => {
+        xlBodyCell(cell, cn !== 3 && cn !== 4 && cn !== 14); // v5.6: cột N tên người quét căn trái
+        if (cn >= NC - 3 && cn <= NC - 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: GREEN } };
+        if (cn === NC - 1) cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+      });
+      if (boxStr.length > 40) row.height = Math.max(18, Math.ceil(boxStr.length / 40) * 15);
     });
+    // Dòng "Tổng" của chỉ thị (nền cam) — đúng mẫu
+    const tr = ws.addRow([]);
+    ws.mergeCells(tr.number, 1, tr.number, 10);
+    const cT = tr.getCell(1);
+    cT.value = "Tổng";
+    cT.font = { name: "Arial", size: 11, bold: true, color: { argb: "FF0F172A" } };
+    cT.alignment = { horizontal: "center", vertical: "middle" };
+    const cK = tr.getCell(11), cL = tr.getCell(12);
+    cK.value = gr.sP; cL.value = gr.sQ;
+    [cK, cL].forEach((c) => {
+      c.font = { name: "Arial", size: 11, bold: true, color: { argb: "FF0F172A" } };
+      c.alignment = { horizontal: "center", vertical: "middle" };
+    });
+    for (let c = 1; c <= NC; c++) {
+      const cell = tr.getCell(c);
+      cell.border = xlBorder();
+      if (c <= 12) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: ORANGE } };
+    }
+    tr.height = 20;
   });
   if (rep.noPack.length) {
     const ws2 = wb.addWorksheet("Chưa có packing");
